@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capabilities for the Appwave app","local":true,"windows":["*"],"permissions":["core:default","opener:default","dialog:default"]}}
