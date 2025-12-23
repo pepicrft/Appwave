@@ -11,17 +11,47 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-appwave-core = { path = "../core" }
+# Tauri
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Web server
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+
+# Database (SQLite)
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+
+# Configuration
+toml = "0.8"
+directories = "5"
+
+# Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-open = "5"
+
+# Error handling
 anyhow = "1.0"
+thiserror = "1.0"
+
+# Static file serving
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+tower = "0.5"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+open = "5"
+
+[dev-dependencies]
+tempfile = "3"
 
 [target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]
 tauri-plugin-single-instance = "2"

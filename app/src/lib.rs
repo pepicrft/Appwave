@@ -1,4 +1,12 @@
-use appwave_core::{Config, Database, ServerHandle};
+mod config;
+mod db;
+mod routes;
+mod server;
+
+use clap::{Parser, Subcommand};
+use config::Config;
+use db::Database;
+use server::ServerHandle;
 use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -8,6 +16,32 @@ use tauri::{
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
+#[derive(Parser)]
+#[command(name = "appwave")]
+#[command(about = "AI-powered app development")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
+    /// Enable debug logging
+    #[arg(short, long)]
+    debug: bool,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run headless server without GUI
+    Serve {
+        /// Port to run the server on
+        #[arg(short, long, default_value = "4000")]
+        port: u16,
+
+        /// Path to frontend directory
+        #[arg(short, long)]
+        frontend: Option<String>,
+    },
+}
+
 struct AppState {
     server_handle: Mutex<Option<ServerHandle>>,
     port: Mutex<u16>,
@@ -16,14 +50,76 @@ struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let cli = Cli::parse();
+
+    match cli.command {
+        Some(Commands::Serve { port, frontend }) => {
+            run_headless(port, frontend, cli.debug);
+        }
+        None => {
+            run_desktop(cli.debug);
+        }
+    }
+}
+
+/// Run in headless mode (server only, no GUI)
+fn run_headless(port: u16, frontend_dir: Option<String>, debug: bool) {
     // Setup logging
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("info"))
-        .init();
+    let filter = if debug {
+        EnvFilter::new("debug")
+    } else {
+        EnvFilter::new("info")
+    };
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+
+    // Run the server
+    let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+    rt.block_on(async move {
+        if let Err(e) = run_server_headless(port, frontend_dir).await {
+            error!("Server error: {}", e);
+            std::process::exit(1);
+        }
+    });
+}
+
+async fn run_server_headless(port: u16, frontend_dir: Option<String>) -> anyhow::Result<()> {
+    info!("Starting Appwave server in headless mode...");
+
+    let mut config = Config::load().unwrap_or_default();
+    config.port = port;
+
+    let db_path = config.get_database_path()?;
+    info!("Database path: {}", db_path.display());
+
+    let db = Database::new(&db_path).await?;
+    let handle = server::run_server(config, db, frontend_dir.as_deref()).await?;
+
+    info!("Server running on http://localhost:{}", handle.port());
+    info!("Press Ctrl+C to stop");
+
+    // Wait for shutdown signal
+    tokio::signal::ctrl_c().await?;
+
+    info!("Shutting down...");
+    handle.shutdown();
+
+    Ok(())
+}
+
+/// Run in desktop mode (with system tray)
+fn run_desktop(debug: bool) {
+    // Setup logging
+    let filter = if debug {
+        EnvFilter::new("debug")
+    } else {
+        EnvFilter::new("info")
+    };
+    tracing_subscriber::fmt().with_env_filter(filter).init();
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_cli::init())
         .setup(|app| {
             // Determine frontend directory
             let frontend_dir = get_frontend_dir(app.handle());
@@ -138,7 +234,7 @@ async fn start_server(app: &AppHandle) -> anyhow::Result<()> {
     let state = app.state::<AppState>();
     let frontend_dir = state.frontend_dir.lock().unwrap().clone();
 
-    let handle = appwave_core::run_server(config, db, frontend_dir.as_deref()).await?;
+    let handle = server::run_server(config, db, frontend_dir.as_deref()).await?;
 
     let port = handle.port();
     info!("Server started on port {}", port);

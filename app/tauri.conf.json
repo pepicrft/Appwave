@@ -36,14 +36,27 @@
   },
   "plugins": {
     "cli": {
-      "description": "Appwave CLI",
+      "description": "Appwave - AI-powered app development",
+      "subcommands": {
+        "serve": {
+          "description": "Run headless server without GUI",
+          "args": [
+            {
+              "name": "port",
+              "description": "Port to run the server on",
+              "short": "p",
+              "takesValue": true
+            },
+            {
+              "name": "frontend",
+              "description": "Path to frontend directory",
+              "short": "f",
+              "takesValue": true
+            }
+          ]
+        }
+      },
       "args": [
-        {
-          "name": "port",
-          "description": "Port to run the server on",
-          "short": "p",
-          "takesValue": true
-        },
         {
           "name": "debug",
           "description": "Enable debug logging",
