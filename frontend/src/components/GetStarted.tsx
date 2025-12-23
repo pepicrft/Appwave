@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,6 +10,16 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { FolderOpen } from "lucide-react"
+
+function getPlatformProjectTypes(): string {
+  const platform = navigator.platform.toLowerCase()
+  const isMacOS = platform.includes("mac")
+
+  if (isMacOS) {
+    return "Xcode or Android"
+  }
+  return "Android"
+}
 
 interface ValidateProjectResponse {
   valid: string
@@ -39,6 +49,7 @@ export function GetStarted() {
   const [selectedIndex, setSelectedIndex] = useState(-1)
   const inputRef = useRef<HTMLInputElement>(null)
   const suggestionsRef = useRef<HTMLDivElement>(null)
+  const projectTypes = useMemo(() => getPlatformProjectTypes(), [])
 
   // Fetch recent projects on mount and when typing
   useEffect(() => {
@@ -150,7 +161,7 @@ export function GetStarted() {
           </div>
           <CardTitle className="text-2xl">Welcome to Appwave</CardTitle>
           <CardDescription>
-            Enter the path to your Xcode or Android project to get started
+            Enter the path to your {projectTypes} project to get started
           </CardDescription>
         </CardHeader>
         <CardContent>

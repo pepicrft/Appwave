@@ -41,7 +41,7 @@ describe("GetStarted", () => {
 
     expect(screen.getByText("Welcome to Appwave")).toBeInTheDocument()
     expect(
-      screen.getByText(/enter the path to your xcode or android project/i)
+      screen.getByText(/enter the path to your .+ project to get started/i)
     ).toBeInTheDocument()
   })
 

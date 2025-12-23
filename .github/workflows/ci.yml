@@ -136,9 +136,64 @@ jobs:
 
       - run: pnpm --dir frontend build
 
+  rust-test:
+    name: Rust Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - run: cargo test --workspace
+
+  frontend-test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: 'mise.toml'
+          cache: 'pnpm'
+          cache-dependency-path: 'frontend/pnpm-lock.yaml'
+
+      - run: pnpm --dir frontend install
+
+      - run: pnpm --dir frontend test:run
+
   build-app:
-    name: Build App
-    runs-on: macos-latest
+    name: Build App (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact-name: appwave-macos
+          - os: ubuntu-latest
+            artifact-name: appwave-linux
+          - os: windows-latest
+            artifact-name: appwave-windows
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -160,6 +215,12 @@ jobs:
         with:
           workspaces: ". -> target"
 
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
       - run: pnpm --dir frontend install
 
       - run: pnpm --dir frontend build
@@ -169,5 +230,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: appwave-macos
+          name: ${{ matrix.artifact-name }}
           path: target/release/bundle/
