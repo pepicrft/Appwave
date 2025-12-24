@@ -250,7 +250,17 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p release-files
-          find all-artifacts -type f -exec cp {} release-files/ \;
+          # Only copy distributable packages and their checksums
+          find all-artifacts -type f \( \
+            -name "*.dmg" -o \
+            -name "*.deb" -o \
+            -name "*.rpm" -o \
+            -name "*.AppImage" -o \
+            -name "*.msi" -o \
+            -name "*.exe" -o \
+            -name "*.sha256" -o \
+            -name "*.sha512" \
+          \) -exec cp {} release-files/ \;
           ls -lah release-files/
 
       - name: Create Release
