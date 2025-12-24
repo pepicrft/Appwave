@@ -1,4 +1,4 @@
-use crate::db::entity::projects;
+use crate::db::entity::projects::{self, ProjectType};
 use crate::server::AppState;
 use axum::{
     extract::{Query, State},
@@ -10,7 +10,7 @@ use axum::{
 use sea_orm::{entity::*, query::*};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -59,16 +59,19 @@ enum ValidateProjectResponse {
         #[serde(rename = "type")]
         project_type: ProjectType,
         name: String,
+        /// Full path to the project file (.xcworkspace, .xcodeproj, or build.gradle)
+        project_path: String,
     },
     #[serde(rename = "false")]
     Invalid { error: String },
 }
 
-#[derive(Debug, Serialize, Clone, PartialEq)]
-#[serde(rename_all = "lowercase")]
-enum ProjectType {
-    Xcode,
-    Android,
+/// Detected project information
+struct DetectedProject {
+    project_type: ProjectType,
+    name: String,
+    /// Full path to the project file
+    project_path: PathBuf,
 }
 
 /// Validate that a directory contains a valid project (Xcode or Android)
@@ -82,42 +85,37 @@ async fn validate_project(
         return (
             StatusCode::BAD_REQUEST,
             Json(ValidateProjectResponse::Invalid {
-                error: "Directory does not exist".to_string(),
+                error: "Path does not exist".to_string(),
             }),
         );
     }
 
-    if !path.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ValidateProjectResponse::Invalid {
-                error: "Path is not a directory".to_string(),
-            }),
-        );
-    }
+    // If path is a file, check if it's a valid project file directly
+    // If path is a directory, search for project files within it
+    let detected = if path.is_file() {
+        detect_project_from_file(path)
+    } else {
+        detect_project_in_directory(path)
+    };
 
-    match detect_project_type(path) {
-        Some((project_type, name)) => {
-            // Save to recent projects using SeaORM
-            let type_str = match project_type {
-                ProjectType::Xcode => "xcode",
-                ProjectType::Android => "android",
-            };
+    match detected {
+        Some(project) => {
+            let project_path_str = project.project_path.to_string_lossy().to_string();
 
-            // Try to find existing project
+            // Try to find existing project by path
             let existing = projects::Entity::find()
-                .filter(projects::Column::Path.eq(&request.path))
+                .filter(projects::Column::Path.eq(&project_path_str))
                 .one(state.db.conn())
                 .await;
 
             let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
             match existing {
-                Ok(Some(project)) => {
+                Ok(Some(existing_project)) => {
                     // Update existing project
-                    let mut active: projects::ActiveModel = project.into();
-                    active.name = Set(name.clone());
-                    active.project_type = Set(type_str.to_string());
+                    let mut active: projects::ActiveModel = existing_project.into();
+                    active.name = Set(project.name.clone());
+                    active.project_type = Set(project.project_type.clone());
                     active.last_opened_at = Set(Some(now));
                     let _ = active.update(state.db.conn()).await;
                 }
@@ -125,9 +123,9 @@ async fn validate_project(
                     // Insert new project
                     let new_project = projects::ActiveModel {
                         id: NotSet,
-                        path: Set(request.path.clone()),
-                        name: Set(name.clone()),
-                        project_type: Set(type_str.to_string()),
+                        path: Set(project_path_str.clone()),
+                        name: Set(project.name.clone()),
+                        project_type: Set(project.project_type.clone()),
                         last_opened_at: Set(Some(now.clone())),
                         created_at: Set(Some(now)),
                     };
@@ -140,7 +138,11 @@ async fn validate_project(
 
             (
                 StatusCode::OK,
-                Json(ValidateProjectResponse::Valid { project_type, name }),
+                Json(ValidateProjectResponse::Valid {
+                    project_type: project.project_type,
+                    name: project.name,
+                    project_path: project_path_str,
+                }),
             )
         }
         None => (
@@ -152,34 +154,91 @@ async fn validate_project(
     }
 }
 
-/// Detect the project type by looking for specific files/directories
-fn detect_project_type(path: &Path) -> Option<(ProjectType, String)> {
+/// Detect project type from a specific file path
+fn detect_project_from_file(path: &Path) -> Option<DetectedProject> {
+    let file_name = path.file_name()?.to_string_lossy();
+
+    // Xcode workspace
+    if file_name.ends_with(".xcworkspace") {
+        let name = file_name.trim_end_matches(".xcworkspace").to_string();
+        return Some(DetectedProject {
+            project_type: ProjectType::Xcode,
+            name,
+            project_path: path.to_path_buf(),
+        });
+    }
+
+    // Xcode project
+    if file_name.ends_with(".xcodeproj") {
+        let name = file_name.trim_end_matches(".xcodeproj").to_string();
+        return Some(DetectedProject {
+            project_type: ProjectType::Xcode,
+            name,
+            project_path: path.to_path_buf(),
+        });
+    }
+
+    // Android Gradle build file
+    if file_name == "build.gradle" || file_name == "build.gradle.kts" {
+        let name = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        return Some(DetectedProject {
+            project_type: ProjectType::Android,
+            name,
+            project_path: path.to_path_buf(),
+        });
+    }
+
+    None
+}
+
+/// Detect project type by searching a directory for project files
+fn detect_project_in_directory(path: &Path) -> Option<DetectedProject> {
     let entries = std::fs::read_dir(path).ok()?;
 
+    // First pass: look for workspace (takes priority)
     for entry in entries.flatten() {
         let file_name = entry.file_name();
         let file_name_str = file_name.to_string_lossy();
 
-        // Check for Xcode workspace first (takes priority over .xcodeproj)
         if file_name_str.ends_with(".xcworkspace") {
             let name = file_name_str.trim_end_matches(".xcworkspace").to_string();
-            return Some((ProjectType::Xcode, name));
+            return Some(DetectedProject {
+                project_type: ProjectType::Xcode,
+                name,
+                project_path: entry.path(),
+            });
         }
+    }
 
-        // Check for Xcode project
+    // Second pass: look for project or gradle
+    let entries = std::fs::read_dir(path).ok()?;
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let file_name_str = file_name.to_string_lossy();
+
         if file_name_str.ends_with(".xcodeproj") {
             let name = file_name_str.trim_end_matches(".xcodeproj").to_string();
-            return Some((ProjectType::Xcode, name));
+            return Some(DetectedProject {
+                project_type: ProjectType::Xcode,
+                name,
+                project_path: entry.path(),
+            });
         }
 
-        // Check for Android project (Gradle build files)
         if file_name_str == "build.gradle" || file_name_str == "build.gradle.kts" {
-            // Use the directory name as project name
             let name = path
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "Unknown".to_string());
-            return Some((ProjectType::Android, name));
+            return Some(DetectedProject {
+                project_type: ProjectType::Android,
+                name,
+                project_path: entry.path(),
+            });
         }
     }
 
@@ -200,10 +259,12 @@ fn default_limit() -> u64 {
 
 #[derive(Debug, Serialize)]
 struct RecentProject {
+    /// Path to the project file
     path: String,
     name: String,
     #[serde(rename = "type")]
-    project_type: String,
+    project_type: ProjectType,
+    /// Whether the project file still exists
     valid: bool,
 }
 
@@ -224,12 +285,12 @@ async fn get_recent_projects(
 
     match query.all(state.db.conn()).await {
         Ok(projects) => {
-            // Validate each project still exists
+            // Validate each project file still exists
             let validated: Vec<RecentProject> = projects
                 .into_iter()
                 .map(|p| {
                     let path = Path::new(&p.path);
-                    let valid = path.exists() && detect_project_type(path).is_some();
+                    let valid = path.exists();
                     RecentProject {
                         path: p.path,
                         name: p.name,
@@ -262,11 +323,12 @@ mod tests {
         let dir = create_test_dir();
         std::fs::create_dir(dir.path().join("MyApp.xcodeproj")).unwrap();
 
-        let result = detect_project_type(dir.path());
+        let result = detect_project_in_directory(dir.path());
         assert!(result.is_some());
-        let (project_type, name) = result.unwrap();
-        assert_eq!(project_type, ProjectType::Xcode);
-        assert_eq!(name, "MyApp");
+        let project = result.unwrap();
+        assert_eq!(project.project_type, ProjectType::Xcode);
+        assert_eq!(project.name, "MyApp");
+        assert!(project.project_path.ends_with("MyApp.xcodeproj"));
     }
 
     #[test]
@@ -274,11 +336,12 @@ mod tests {
         let dir = create_test_dir();
         std::fs::create_dir(dir.path().join("MyWorkspace.xcworkspace")).unwrap();
 
-        let result = detect_project_type(dir.path());
+        let result = detect_project_in_directory(dir.path());
         assert!(result.is_some());
-        let (project_type, name) = result.unwrap();
-        assert_eq!(project_type, ProjectType::Xcode);
-        assert_eq!(name, "MyWorkspace");
+        let project = result.unwrap();
+        assert_eq!(project.project_type, ProjectType::Xcode);
+        assert_eq!(project.name, "MyWorkspace");
+        assert!(project.project_path.ends_with("MyWorkspace.xcworkspace"));
     }
 
     #[test]
@@ -286,10 +349,11 @@ mod tests {
         let dir = create_test_dir();
         std::fs::write(dir.path().join("build.gradle"), "// gradle build").unwrap();
 
-        let result = detect_project_type(dir.path());
+        let result = detect_project_in_directory(dir.path());
         assert!(result.is_some());
-        let (project_type, _name) = result.unwrap();
-        assert_eq!(project_type, ProjectType::Android);
+        let project = result.unwrap();
+        assert_eq!(project.project_type, ProjectType::Android);
+        assert!(project.project_path.ends_with("build.gradle"));
     }
 
     #[test]
@@ -297,10 +361,11 @@ mod tests {
         let dir = create_test_dir();
         std::fs::write(dir.path().join("build.gradle.kts"), "// kotlin gradle build").unwrap();
 
-        let result = detect_project_type(dir.path());
+        let result = detect_project_in_directory(dir.path());
         assert!(result.is_some());
-        let (project_type, _name) = result.unwrap();
-        assert_eq!(project_type, ProjectType::Android);
+        let project = result.unwrap();
+        assert_eq!(project.project_type, ProjectType::Android);
+        assert!(project.project_path.ends_with("build.gradle.kts"));
     }
 
     #[test]
@@ -308,7 +373,7 @@ mod tests {
         let dir = create_test_dir();
         std::fs::write(dir.path().join("README.md"), "# Hello").unwrap();
 
-        let result = detect_project_type(dir.path());
+        let result = detect_project_in_directory(dir.path());
         assert!(result.is_none());
     }
 
@@ -316,7 +381,7 @@ mod tests {
     fn test_detect_empty_directory() {
         let dir = create_test_dir();
 
-        let result = detect_project_type(dir.path());
+        let result = detect_project_in_directory(dir.path());
         assert!(result.is_none());
     }
 
@@ -326,10 +391,37 @@ mod tests {
         std::fs::create_dir(dir.path().join("MyApp.xcodeproj")).unwrap();
         std::fs::create_dir(dir.path().join("MyApp.xcworkspace")).unwrap();
 
-        let result = detect_project_type(dir.path());
+        let result = detect_project_in_directory(dir.path());
         assert!(result.is_some());
-        let (project_type, name) = result.unwrap();
-        assert_eq!(project_type, ProjectType::Xcode);
-        assert_eq!(name, "MyApp");
+        let project = result.unwrap();
+        assert_eq!(project.project_type, ProjectType::Xcode);
+        assert_eq!(project.name, "MyApp");
+        // Workspace should take priority
+        assert!(project.project_path.ends_with("MyApp.xcworkspace"));
+    }
+
+    #[test]
+    fn test_detect_from_file_xcworkspace() {
+        let dir = create_test_dir();
+        let workspace_path = dir.path().join("MyApp.xcworkspace");
+        std::fs::create_dir(&workspace_path).unwrap();
+
+        let result = detect_project_from_file(&workspace_path);
+        assert!(result.is_some());
+        let project = result.unwrap();
+        assert_eq!(project.project_type, ProjectType::Xcode);
+        assert_eq!(project.name, "MyApp");
+    }
+
+    #[test]
+    fn test_detect_from_file_gradle() {
+        let dir = create_test_dir();
+        let gradle_path = dir.path().join("build.gradle");
+        std::fs::write(&gradle_path, "// gradle").unwrap();
+
+        let result = detect_project_from_file(&gradle_path);
+        assert!(result.is_some());
+        let project = result.unwrap();
+        assert_eq!(project.project_type, ProjectType::Android);
     }
 }

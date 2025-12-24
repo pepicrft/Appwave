@@ -95,20 +95,22 @@ describe("GetStarted", () => {
           valid: "true",
           type: "xcode",
           name: "MyApp",
+          project_path: "/path/to/MyApp.xcworkspace",
         }),
     } as Response)
 
     renderGetStarted()
 
     const input = screen.getByLabelText("Project path")
-    fireEvent.change(input, { target: { value: "/path/to/MyApp" } })
+    fireEvent.change(input, { target: { value: "/path/to" } })
 
     const button = screen.getByRole("button", { name: /open project/i })
     fireEvent.click(button)
 
     await waitFor(() => {
+      // Should navigate to the resolved project file path, not the input directory
       expect(mockNavigate).toHaveBeenCalledWith(
-        "/?project=%2Fpath%2Fto%2FMyApp"
+        "/?project=%2Fpath%2Fto%2FMyApp.xcworkspace"
       )
     })
   })
@@ -120,7 +122,12 @@ describe("GetStarted", () => {
           setTimeout(
             () =>
               resolve({
-                json: () => Promise.resolve({ valid: "true", type: "xcode", name: "MyApp" }),
+                json: () => Promise.resolve({
+                  valid: "true",
+                  type: "xcode",
+                  name: "MyApp",
+                  project_path: "/path/to/project/MyApp.xcworkspace"
+                }),
               } as Response),
             100
           )
