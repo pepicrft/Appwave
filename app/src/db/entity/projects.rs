@@ -1,15 +1,28 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
-/// Project type enum stored as string in database
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
-#[sea_orm(rs_type = "String", db_type = "Text")]
+/// Project type derived from the project file path
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProjectType {
-    #[sea_orm(string_value = "xcode")]
     Xcode,
-    #[sea_orm(string_value = "android")]
     Android,
+}
+
+impl ProjectType {
+    /// Infer project type from a file path
+    pub fn from_path(path: &Path) -> Option<Self> {
+        let name = path.file_name()?.to_string_lossy();
+
+        if name.ends_with(".xcworkspace") || name.ends_with(".xcodeproj") {
+            Some(ProjectType::Xcode)
+        } else if name == "build.gradle" || name == "build.gradle.kts" {
+            Some(ProjectType::Android)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Serialize, Deserialize)]
@@ -21,9 +34,15 @@ pub struct Model {
     #[sea_orm(unique)]
     pub path: String,
     pub name: String,
-    pub project_type: ProjectType,
     pub last_opened_at: Option<String>,
     pub created_at: Option<String>,
+}
+
+impl Model {
+    /// Get the project type inferred from the path
+    pub fn project_type(&self) -> Option<ProjectType> {
+        ProjectType::from_path(Path::new(&self.path))
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

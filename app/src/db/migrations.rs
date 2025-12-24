@@ -50,7 +50,7 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count.0, 2);
+        assert_eq!(count.0, 3);
     }
 
     #[tokio::test]
@@ -67,11 +67,11 @@ mod tests {
         run(&pool).await.unwrap();
         run(&pool).await.unwrap();
 
-        // Still only 2 migrations recorded
+        // Still only 3 migrations recorded
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM _sqlx_migrations")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count.0, 2);
+        assert_eq!(count.0, 3);
     }
 }

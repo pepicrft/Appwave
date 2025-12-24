@@ -26,7 +26,7 @@ interface ValidateProjectResponse {
   type?: "xcode" | "android"
   name?: string
   /** Full path to the project file (.xcworkspace, .xcodeproj, or build.gradle) */
-  project_path?: string
+  path?: string
   error?: string
 }
 
@@ -105,9 +105,9 @@ export function GetStarted() {
 
       const data: ValidateProjectResponse = await response.json()
 
-      if (data.valid === "true" && data.project_path) {
+      if (data.valid === "true" && data.path) {
         // Use the resolved project file path, not the input directory
-        navigate(`/?project=${encodeURIComponent(data.project_path)}`)
+        navigate(`/?project=${encodeURIComponent(data.path)}`)
       } else if (data.valid === "false") {
         setError(data.error || "Invalid project directory")
       }

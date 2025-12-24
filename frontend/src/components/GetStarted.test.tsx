@@ -95,7 +95,7 @@ describe("GetStarted", () => {
           valid: "true",
           type: "xcode",
           name: "MyApp",
-          project_path: "/path/to/MyApp.xcworkspace",
+          path: "/path/to/MyApp.xcworkspace",
         }),
     } as Response)
 
@@ -126,7 +126,7 @@ describe("GetStarted", () => {
                   valid: "true",
                   type: "xcode",
                   name: "MyApp",
-                  project_path: "/path/to/project/MyApp.xcworkspace"
+                  path: "/path/to/project/MyApp.xcworkspace"
                 }),
               } as Response),
             100
