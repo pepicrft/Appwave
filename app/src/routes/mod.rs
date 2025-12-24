@@ -1,3 +1,4 @@
+use crate::db::entity::projects;
 use crate::server::AppState;
 use axum::{
     extract::{Query, State},
@@ -6,6 +7,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use sea_orm::{entity::*, query::*};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::Path;
@@ -96,16 +98,45 @@ async fn validate_project(
 
     match detect_project_type(path) {
         Some((project_type, name)) => {
-            // Save to recent projects
+            // Save to recent projects using SeaORM
             let type_str = match project_type {
                 ProjectType::Xcode => "xcode",
                 ProjectType::Android => "android",
             };
-            let _ = state
-                .db
-                .projects()
-                .upsert(&request.path, &name, type_str)
+
+            // Try to find existing project
+            let existing = projects::Entity::find()
+                .filter(projects::Column::Path.eq(&request.path))
+                .one(state.db.conn())
                 .await;
+
+            let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+            match existing {
+                Ok(Some(project)) => {
+                    // Update existing project
+                    let mut active: projects::ActiveModel = project.into();
+                    active.name = Set(name.clone());
+                    active.project_type = Set(type_str.to_string());
+                    active.last_opened_at = Set(Some(now));
+                    let _ = active.update(state.db.conn()).await;
+                }
+                Ok(None) => {
+                    // Insert new project
+                    let new_project = projects::ActiveModel {
+                        id: NotSet,
+                        path: Set(request.path.clone()),
+                        name: Set(name.clone()),
+                        project_type: Set(type_str.to_string()),
+                        last_opened_at: Set(Some(now.clone())),
+                        created_at: Set(Some(now)),
+                    };
+                    let _ = projects::Entity::insert(new_project)
+                        .exec(state.db.conn())
+                        .await;
+                }
+                Err(_) => {}
+            }
 
             (
                 StatusCode::OK,
@@ -160,10 +191,10 @@ struct RecentProjectsQuery {
     #[serde(default)]
     query: Option<String>,
     #[serde(default = "default_limit")]
-    limit: i64,
+    limit: u64,
 }
 
-fn default_limit() -> i64 {
+fn default_limit() -> u64 {
     10
 }
 
@@ -181,13 +212,17 @@ async fn get_recent_projects(
     State(state): State<Arc<AppState>>,
     Query(params): Query<RecentProjectsQuery>,
 ) -> impl IntoResponse {
-    let projects = if let Some(query) = params.query {
-        state.db.projects().search(&query, params.limit).await
+    let query = projects::Entity::find()
+        .order_by_desc(projects::Column::LastOpenedAt)
+        .limit(params.limit);
+
+    let query = if let Some(ref search) = params.query {
+        query.filter(projects::Column::Path.contains(search))
     } else {
-        state.db.projects().get_recent(params.limit).await
+        query
     };
 
-    match projects {
+    match query.all(state.db.conn()).await {
         Ok(projects) => {
             // Validate each project still exists
             let validated: Vec<RecentProject> = projects

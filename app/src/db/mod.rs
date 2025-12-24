@@ -1,53 +1,46 @@
+pub mod entity;
 mod migrations;
-mod projects;
-mod settings;
 
 use anyhow::Result;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
+use sea_orm::{Database as SeaDatabase, DatabaseConnection};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::path::Path;
 use std::str::FromStr;
 
-pub use projects::{Project, ProjectsRepository};
-pub use settings::SettingsRepository;
 
-/// Database connection pool
+/// Database connection wrapper
 #[derive(Clone)]
 pub struct Database {
-    pool: SqlitePool,
+    conn: DatabaseConnection,
 }
 
 impl Database {
     /// Create a new database connection
     pub async fn new(path: &Path) -> Result<Self> {
         let path_str = path.to_string_lossy();
+        let url = format!("sqlite:{}?mode=rwc", path_str);
 
-        let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", path_str))?
+        // Run migrations using SQLx first
+        let options = SqliteConnectOptions::from_str(&url)?
             .create_if_missing(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
 
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(1)
             .connect_with(options)
             .await?;
 
-        let db = Self { pool };
-        migrations::run(&db.pool).await?;
+        migrations::run(&pool).await?;
+        drop(pool);
 
-        Ok(db)
+        // Now connect with SeaORM
+        let conn = SeaDatabase::connect(&url).await?;
+
+        Ok(Self { conn })
     }
 
-    /// Get the underlying pool for direct queries
-    pub fn pool(&self) -> &SqlitePool {
-        &self.pool
-    }
-
-    /// Get settings repository
-    pub fn settings(&self) -> SettingsRepository {
-        SettingsRepository::new(self.pool.clone())
-    }
-
-    /// Get projects repository
-    pub fn projects(&self) -> ProjectsRepository {
-        ProjectsRepository::new(self.pool.clone())
+    /// Get the database connection
+    pub fn conn(&self) -> &DatabaseConnection {
+        &self.conn
     }
 }
