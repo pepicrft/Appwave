@@ -114,8 +114,9 @@ jobs:
         working-directory: app
 
       - name: Generate checksums
+        working-directory: app
         run: |
-          cd app/target/release/bundle
+          cd target/release/bundle
           find . -type f \( -name "*.dmg" -o -name "*.app" -o -name "*.app.tar.gz" \) -print0 | while IFS= read -r -d '' file; do
             echo "Generating checksums for: $file"
             shasum -a 256 "$file" > "$file.sha256"
@@ -159,8 +160,9 @@ jobs:
         working-directory: app
 
       - name: Generate checksums
+        working-directory: app
         run: |
-          cd app/target/release/bundle
+          cd target/release/bundle
           find . -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \) -print0 | while IFS= read -r -d '' file; do
             echo "Generating checksums for: $file"
             sha256sum "$file" > "$file.sha256"
@@ -199,9 +201,10 @@ jobs:
         working-directory: app
 
       - name: Generate checksums
+        working-directory: app
         shell: pwsh
         run: |
-          cd app\target\release\bundle
+          cd target\release\bundle
           Get-ChildItem -Recurse -Include *.msi,*.exe | ForEach-Object {
             $file = $_.FullName
             Write-Host "Generating checksums for: $file"
