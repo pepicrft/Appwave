@@ -1,5 +1,6 @@
 use crate::db::entity::projects::{self, ProjectType};
 use crate::server::AppState;
+use crate::xcode;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -20,7 +21,8 @@ pub fn create_routes(frontend_dir: Option<&str>) -> Router<Arc<AppState>> {
         .route("/health", get(health))
         .route("/about", get(about))
         .route("/projects/validate", post(validate_project))
-        .route("/projects/recent", get(get_recent_projects));
+        .route("/projects/recent", get(get_recent_projects))
+        .route("/xcode/schemes", post(get_xcode_schemes));
 
     let router = Router::new().nest("/api", api_routes);
 
@@ -320,6 +322,33 @@ async fn get_recent_projects(
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": "Failed to fetch projects" })),
+        ),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct XcodeSchemesRequest {
+    path: String,
+}
+
+/// Get Xcode schemes for a project or workspace
+async fn get_xcode_schemes(Json(request): Json<XcodeSchemesRequest>) -> impl IntoResponse {
+    let path = Path::new(&request.path);
+
+    match xcode::discover_project(path) {
+        Ok(project) => (StatusCode::OK, Json(json!({
+            "path": project.path,
+            "project_type": match project.project_type {
+                xcode::ProjectType::Project => "project",
+                xcode::ProjectType::Workspace => "workspace",
+            },
+            "schemes": project.schemes,
+            "targets": project.targets,
+            "configurations": project.configurations,
+        }))),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": error })),
         ),
     }
 }

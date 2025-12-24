@@ -1,6 +1,7 @@
-mod db;
-mod routes;
-mod server;
+pub mod db;
+pub mod routes;
+pub mod server;
+pub mod xcode;
 
 use clap::{Parser, Subcommand};
 use db::Database;
