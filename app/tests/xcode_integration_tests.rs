@@ -76,9 +76,7 @@ async fn test_xcode_schemes_endpoint_with_xcodeproj() {
     // Note: This will fail with xcodebuild error since we have a mock project
     // In a real scenario, xcodebuild would need a valid project structure
     // We're testing the endpoint accepts the request properly
-    assert!(
-        response.status() == StatusCode::OK || response.status() == StatusCode::BAD_REQUEST
-    );
+    assert!(response.status() == StatusCode::OK || response.status() == StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -105,9 +103,7 @@ async fn test_xcode_schemes_endpoint_with_directory() {
         .unwrap();
 
     // Should find the project in the directory
-    assert!(
-        response.status() == StatusCode::OK || response.status() == StatusCode::BAD_REQUEST
-    );
+    assert!(response.status() == StatusCode::OK || response.status() == StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -207,9 +203,7 @@ async fn test_xcode_schemes_endpoint_workspace_priority() {
 
     // Should prefer workspace over project (will fail with xcodebuild but that's ok)
     // We're testing that the endpoint picks the workspace
-    assert!(
-        response.status() == StatusCode::OK || response.status() == StatusCode::BAD_REQUEST
-    );
+    assert!(response.status() == StatusCode::OK || response.status() == StatusCode::BAD_REQUEST);
 
     if response.status() == StatusCode::BAD_REQUEST {
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)

@@ -59,8 +59,8 @@ pub fn discover_project(path: &Path) -> Result<XcodeProject, String> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let build_list: XcodeBuildList =
-        serde_json::from_str(&stdout).map_err(|e| format!("Failed to parse xcodebuild output: {}", e))?;
+    let build_list: XcodeBuildList = serde_json::from_str(&stdout)
+        .map_err(|e| format!("Failed to parse xcodebuild output: {}", e))?;
 
     let info = match project_type {
         ProjectType::Workspace => build_list.workspace,
@@ -92,10 +92,16 @@ fn find_project_or_workspace(path: &Path) -> Result<(PathBuf, ProjectType), Stri
     }
 
     // Otherwise, search in the directory
-    let search_dir = if path.is_dir() { path } else { path.parent().unwrap() };
+    let search_dir = if path.is_dir() {
+        path
+    } else {
+        path.parent().unwrap()
+    };
 
     // Prefer workspace over project
-    for entry in std::fs::read_dir(search_dir).map_err(|e| format!("Failed to read directory: {}", e))? {
+    for entry in
+        std::fs::read_dir(search_dir).map_err(|e| format!("Failed to read directory: {}", e))?
+    {
         let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
         let entry_path = entry.path();
 
@@ -107,7 +113,9 @@ fn find_project_or_workspace(path: &Path) -> Result<(PathBuf, ProjectType), Stri
     }
 
     // Fall back to project if no workspace found
-    for entry in std::fs::read_dir(search_dir).map_err(|e| format!("Failed to read directory: {}", e))? {
+    for entry in
+        std::fs::read_dir(search_dir).map_err(|e| format!("Failed to read directory: {}", e))?
+    {
         let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
         let entry_path = entry.path();
 
@@ -149,7 +157,11 @@ mod tests {
 
         // Create contents.xcworkspacedata
         let contents_dir = workspace_path.join("contents.xcworkspacedata");
-        fs::write(&contents_dir, "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Workspace version=\"1.0\"></Workspace>").unwrap();
+        fs::write(
+            &contents_dir,
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Workspace version=\"1.0\"></Workspace>",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -234,7 +246,9 @@ mod tests {
 
         let result = find_project_or_workspace(dir.path());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No .xcworkspace or .xcodeproj found"));
+        assert!(result
+            .unwrap_err()
+            .contains("No .xcworkspace or .xcodeproj found"));
     }
 
     #[test]
@@ -243,6 +257,8 @@ mod tests {
 
         let result = find_project_or_workspace(dir.path());
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No .xcworkspace or .xcodeproj found"));
+        assert!(result
+            .unwrap_err()
+            .contains("No .xcworkspace or .xcodeproj found"));
     }
 }
