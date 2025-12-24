@@ -113,31 +113,20 @@ jobs:
         run: cargo tauri build
         working-directory: app
 
-      - name: Prepare artifacts
-        run: |
-          mkdir -p artifacts
-
-          # Find and copy macOS bundles
-          find target/release/bundle -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \) -exec cp {} artifacts/ \;
-
-          # List what we found
-          ls -lah artifacts/
-
       - name: Generate checksums
         run: |
-          cd artifacts
-          for file in *; do
-            if [ -f "$file" ]; then
-              shasum -a 256 "$file" > "$file.sha256"
-              shasum -a 512 "$file" > "$file.sha512"
-            fi
+          cd target/release/bundle
+          find . -type f \( -name "*.dmg" -o -name "*.app" -o -name "*.app.tar.gz" \) -print0 | while IFS= read -r -d '' file; do
+            echo "Generating checksums for: $file"
+            shasum -a 256 "$file" > "$file.sha256"
+            shasum -a 512 "$file" > "$file.sha512"
           done
-          ls -lah
+          find . -type f \( -name "*.sha256" -o -name "*.sha512" \) -ls
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-artifacts
-          path: artifacts/
+          path: target/release/bundle/
 
   build-linux:
     name: Build Linux
@@ -169,31 +158,20 @@ jobs:
         run: cargo tauri build
         working-directory: app
 
-      - name: Prepare artifacts
-        run: |
-          mkdir -p artifacts
-
-          # Find and copy Linux bundles
-          find target/release/bundle -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \) -exec cp {} artifacts/ \;
-
-          # List what we found
-          ls -lah artifacts/
-
       - name: Generate checksums
         run: |
-          cd artifacts
-          for file in *; do
-            if [ -f "$file" ]; then
-              sha256sum "$file" > "$file.sha256"
-              sha512sum "$file" > "$file.sha512"
-            fi
+          cd target/release/bundle
+          find . -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \) -print0 | while IFS= read -r -d '' file; do
+            echo "Generating checksums for: $file"
+            sha256sum "$file" > "$file.sha256"
+            sha512sum "$file" > "$file.sha512"
           done
-          ls -lah
+          find . -type f \( -name "*.sha256" -o -name "*.sha512" \) -ls
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux-artifacts
-          path: artifacts/
+          path: target/release/bundle/
 
   build-windows:
     name: Build Windows
@@ -220,32 +198,25 @@ jobs:
         run: cargo tauri build
         working-directory: app
 
-      - name: Prepare artifacts
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path artifacts
-
-          # Find and copy Windows bundles
-          Get-ChildItem -Path target\release\bundle -Recurse -Include *.msi,*.exe | Copy-Item -Destination artifacts\
-
-          # List what we found
-          Get-ChildItem -Path artifacts\
-
       - name: Generate checksums
         shell: pwsh
         run: |
-          cd artifacts
-          Get-ChildItem -File | ForEach-Object {
-            $file = $_.Name
-            (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower() + "  " + $file | Out-File -FilePath "$file.sha256" -Encoding ASCII
-            (Get-FileHash -Algorithm SHA512 $file).Hash.ToLower() + "  " + $file | Out-File -FilePath "$file.sha512" -Encoding ASCII
+          cd target\release\bundle
+          Get-ChildItem -Recurse -Include *.msi,*.exe | ForEach-Object {
+            $file = $_.FullName
+            Write-Host "Generating checksums for: $file"
+            $hash256 = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+            $hash512 = (Get-FileHash -Algorithm SHA512 $file).Hash.ToLower()
+            $relativePath = $_.Name
+            "$hash256  $relativePath" | Out-File -FilePath "$file.sha256" -Encoding ASCII
+            "$hash512  $relativePath" | Out-File -FilePath "$file.sha512" -Encoding ASCII
           }
-          Get-ChildItem
+          Get-ChildItem -Recurse -Include *.sha256,*.sha512
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-artifacts
-          path: artifacts/
+          path: target/release/bundle/
 
   release:
     name: Create GitHub Release
