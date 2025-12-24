@@ -1,10 +1,8 @@
-mod config;
 mod db;
 mod routes;
 mod server;
 
 use clap::{Parser, Subcommand};
-use config::Config;
 use db::Database;
 use server::ServerHandle;
 use std::sync::Mutex;
@@ -85,14 +83,11 @@ fn run_headless(port: u16, frontend_dir: Option<String>, debug: bool) {
 async fn run_server_headless(port: u16, frontend_dir: Option<String>) -> anyhow::Result<()> {
     info!("Starting Plasma server in headless mode...");
 
-    let mut config = Config::load().unwrap_or_default();
-    config.port = port;
-
-    let db_path = config.get_database_path()?;
+    let db_path = db::default_path()?;
     info!("Database path: {}", db_path.display());
 
     let db = Database::new(&db_path).await?;
-    let handle = server::run_server(config, db, frontend_dir.as_deref()).await?;
+    let handle = server::run_server(port, db, frontend_dir.as_deref()).await?;
 
     info!("Server running on http://localhost:{}", handle.port());
     info!("Press Ctrl+C to stop");
@@ -221,11 +216,9 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn start_server(app: &AppHandle) -> anyhow::Result<()> {
-    info!("Starting Appwave server...");
+    info!("Starting Plasma server...");
 
-    let config = Config::load().unwrap_or_default();
-    let db_path = config.get_database_path()?;
-
+    let db_path = db::default_path()?;
     info!("Database path: {}", db_path.display());
 
     let db = Database::new(&db_path).await?;
@@ -233,8 +226,9 @@ async fn start_server(app: &AppHandle) -> anyhow::Result<()> {
     // Get frontend directory from state
     let state = app.state::<AppState>();
     let frontend_dir = state.frontend_dir.lock().unwrap().clone();
+    let port = *state.port.lock().unwrap();
 
-    let handle = server::run_server(config, db, frontend_dir.as_deref()).await?;
+    let handle = server::run_server(port, db, frontend_dir.as_deref()).await?;
 
     let port = handle.port();
     info!("Server started on port {}", port);

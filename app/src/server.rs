@@ -1,5 +1,5 @@
 use crate::routes;
-use crate::{Config, Database};
+use crate::Database;
 use anyhow::Result;
 use axum::Router;
 use std::net::SocketAddr;
@@ -13,7 +13,6 @@ use tracing::info;
 #[derive(Clone)]
 pub struct AppState {
     pub db: Database,
-    pub config: Config,
 }
 
 /// Handle to control the running server
@@ -36,14 +35,11 @@ impl ServerHandle {
 
 /// Run the HTTP server
 pub async fn run_server(
-    config: Config,
+    port: u16,
     db: Database,
     frontend_dir: Option<&str>,
 ) -> Result<ServerHandle> {
-    let state = Arc::new(AppState {
-        db,
-        config: config.clone(),
-    });
+    let state = Arc::new(AppState { db });
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -55,7 +51,7 @@ pub async fn run_server(
         .layer(cors)
         .with_state(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], config.port));
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = TcpListener::bind(addr).await?;
     let actual_port = listener.local_addr()?.port();
 

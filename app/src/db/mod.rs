@@ -2,11 +2,23 @@ pub mod entity;
 mod migrations;
 
 use anyhow::Result;
+use directories::ProjectDirs;
 use sea_orm::{Database as SeaDatabase, DatabaseConnection};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+/// Get the default database path for the platform
+pub fn default_path() -> Result<PathBuf> {
+    let proj_dirs = ProjectDirs::from("dev", "plasma", "Plasma")
+        .ok_or_else(|| anyhow::anyhow!("Could not determine data directory"))?;
+
+    let data_dir = proj_dirs.data_dir();
+    fs::create_dir_all(data_dir)?;
+
+    Ok(data_dir.join("plasma.db"))
+}
 
 /// Database connection wrapper
 #[derive(Clone)]
