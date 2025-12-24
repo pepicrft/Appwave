@@ -166,11 +166,7 @@ fn get_frontend_dir(app: &AppHandle) -> Option<String> {
     }
 
     // In production, use the resource directory
-    let resource_path = app
-        .path()
-        .resource_dir()
-        .ok()?
-        .join("frontend");
+    let resource_path = app.path().resource_dir().ok()?.join("frontend");
 
     if resource_path.exists() {
         return Some(resource_path.to_string_lossy().to_string());

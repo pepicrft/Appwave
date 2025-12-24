@@ -374,7 +374,11 @@ mod tests {
     #[test]
     fn test_detect_android_project_kotlin() {
         let dir = create_test_dir();
-        std::fs::write(dir.path().join("build.gradle.kts"), "// kotlin gradle build").unwrap();
+        std::fs::write(
+            dir.path().join("build.gradle.kts"),
+            "// kotlin gradle build",
+        )
+        .unwrap();
 
         let result = detect_project_in_directory(dir.path());
         assert!(result.is_some());

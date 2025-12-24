@@ -24,7 +24,7 @@ function renderGetStarted() {
 describe("GetStarted", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    global.fetch = vi.fn()
+    vi.stubGlobal('fetch', vi.fn())
   })
 
   it("renders input field and button", () => {
@@ -63,7 +63,7 @@ describe("GetStarted", () => {
   })
 
   it("shows error when validation fails", async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce({
+    vi.mocked(fetch).mockResolvedValueOnce({
       json: () =>
         Promise.resolve({
           valid: "false",
@@ -89,7 +89,7 @@ describe("GetStarted", () => {
   })
 
   it("navigates on successful validation", async () => {
-    vi.mocked(global.fetch).mockResolvedValueOnce({
+    vi.mocked(fetch).mockResolvedValueOnce({
       json: () =>
         Promise.resolve({
           valid: "true",
@@ -116,7 +116,7 @@ describe("GetStarted", () => {
   })
 
   it("shows loading state during validation", async () => {
-    vi.mocked(global.fetch).mockImplementationOnce(
+    vi.mocked(fetch).mockImplementationOnce(
       () =>
         new Promise((resolve) =>
           setTimeout(
@@ -146,7 +146,7 @@ describe("GetStarted", () => {
   })
 
   it("shows error when fetch fails", async () => {
-    vi.mocked(global.fetch).mockRejectedValueOnce(new Error("Network error"))
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("Network error"))
 
     renderGetStarted()
 

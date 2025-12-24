@@ -44,6 +44,8 @@ jobs:
         with:
           cache: true
 
+      - run: rustup component add rustfmt
+
       - run: cargo fmt --all -- --check
 
   rust-clippy:

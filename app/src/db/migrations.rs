@@ -28,12 +28,11 @@ mod tests {
         run(&pool).await.unwrap();
 
         // Verify projects table exists
-        let result: (String,) = sqlx::query_as(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='projects'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let result: (String,) =
+            sqlx::query_as("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(result.0, "projects");
 
         // Verify migrations are tracked
