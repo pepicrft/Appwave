@@ -115,7 +115,7 @@ jobs:
 
       - name: Generate checksums
         run: |
-          cd target/release/bundle
+          cd app/target/release/bundle
           find . -type f \( -name "*.dmg" -o -name "*.app" -o -name "*.app.tar.gz" \) -print0 | while IFS= read -r -d '' file; do
             echo "Generating checksums for: $file"
             shasum -a 256 "$file" > "$file.sha256"
@@ -126,7 +126,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: macos-artifacts
-          path: target/release/bundle/
+          path: app/target/release/bundle/
 
   build-linux:
     name: Build Linux
@@ -160,7 +160,7 @@ jobs:
 
       - name: Generate checksums
         run: |
-          cd target/release/bundle
+          cd app/target/release/bundle
           find . -type f \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \) -print0 | while IFS= read -r -d '' file; do
             echo "Generating checksums for: $file"
             sha256sum "$file" > "$file.sha256"
@@ -171,7 +171,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: linux-artifacts
-          path: target/release/bundle/
+          path: app/target/release/bundle/
 
   build-windows:
     name: Build Windows
@@ -201,7 +201,7 @@ jobs:
       - name: Generate checksums
         shell: pwsh
         run: |
-          cd target\release\bundle
+          cd app\target\release\bundle
           Get-ChildItem -Recurse -Include *.msi,*.exe | ForEach-Object {
             $file = $_.FullName
             Write-Host "Generating checksums for: $file"
@@ -216,7 +216,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-artifacts
-          path: target/release/bundle/
+          path: app/target/release/bundle/
 
   release:
     name: Create GitHub Release
