@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { checkForUpdates } from './updater'
+import type { Update } from '@tauri-apps/plugin-updater'
 
 // Mock the Tauri plugins
 vi.mock('@tauri-apps/plugin-updater', () => ({
@@ -43,7 +44,7 @@ describe('updater', () => {
         downloadAndInstall: vi.fn().mockResolvedValue(undefined),
       }
 
-      vi.mocked(check).mockResolvedValue(mockUpdate as any)
+      vi.mocked(check).mockResolvedValue(mockUpdate as Update)
       vi.mocked(ask).mockResolvedValue(false)
 
       await checkForUpdates()
@@ -73,7 +74,7 @@ describe('updater', () => {
         downloadAndInstall: vi.fn().mockResolvedValue(undefined),
       }
 
-      vi.mocked(check).mockResolvedValue(mockUpdate as any)
+      vi.mocked(check).mockResolvedValue(mockUpdate as Update)
       vi.mocked(ask).mockResolvedValue(true)
       vi.mocked(relaunch).mockResolvedValue(undefined)
 
@@ -106,7 +107,7 @@ describe('updater', () => {
         downloadAndInstall: vi.fn().mockRejectedValue(downloadError),
       }
 
-      vi.mocked(check).mockResolvedValue(mockUpdate as any)
+      vi.mocked(check).mockResolvedValue(mockUpdate as Update)
       vi.mocked(ask).mockResolvedValue(true)
 
       await checkForUpdates()
@@ -124,7 +125,7 @@ describe('updater', () => {
         downloadAndInstall: vi.fn(),
       }
 
-      vi.mocked(check).mockResolvedValue(mockUpdate as any)
+      vi.mocked(check).mockResolvedValue(mockUpdate as Update)
       vi.mocked(ask).mockResolvedValue(false)
 
       await checkForUpdates()
