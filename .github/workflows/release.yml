@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
 
 env:
@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       has_changes: ${{ steps.check.outputs.has_changes }}
+      next_version: ${{ steps.version.outputs.next_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -34,17 +35,58 @@ jobs:
             echo "No previous tags found, this will be the first release"
             echo "has_changes=true" >> $GITHUB_OUTPUT
           else
-            # Check if there are commits since the last tag
+            # Check if there are conventional commits since the last tag
             COMMITS_SINCE_TAG=$(git rev-list ${LATEST_TAG}..HEAD --count)
 
             if [ "$COMMITS_SINCE_TAG" -gt 0 ]; then
               echo "Found $COMMITS_SINCE_TAG commits since last tag"
-              echo "has_changes=true" >> $GITHUB_OUTPUT
+
+              # Check if any of these commits are releasable (feat, fix, etc.)
+              RELEASABLE=$(git log ${LATEST_TAG}..HEAD --oneline | grep -E '^[a-f0-9]+ (feat|fix|perf|refactor)(\(|:)' || true)
+
+              if [ -n "$RELEASABLE" ]; then
+                echo "Found releasable commits:"
+                echo "$RELEASABLE"
+                echo "has_changes=true" >> $GITHUB_OUTPUT
+              else
+                echo "No releasable commits found (only chores, docs, etc.)"
+                echo "has_changes=false" >> $GITHUB_OUTPUT
+              fi
             else
               echo "No commits since last tag"
               echo "has_changes=false" >> $GITHUB_OUTPUT
             fi
           fi
+
+      - name: Calculate next version
+        id: version
+        if: steps.check.outputs.has_changes == 'true'
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+
+          # Remove 'v' prefix
+          CURRENT_VERSION=${LATEST_TAG#v}
+
+          # Parse version components
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+          # Check for breaking changes
+          if git log ${LATEST_TAG}..HEAD --format=%B | grep -q 'BREAKING CHANGE:'; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+          # Check for features
+          elif git log ${LATEST_TAG}..HEAD --oneline | grep -qE '^[a-f0-9]+ feat(\(|:)'; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          # Otherwise it's a patch (fix, perf, refactor)
+          else
+            PATCH=$((PATCH + 1))
+          fi
+
+          NEXT_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "Next version: $NEXT_VERSION"
+          echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
 
   build-macos:
     name: Build macOS
@@ -222,8 +264,11 @@ jobs:
           cache: true
 
       - name: Generate changelog
+        env:
+          NEXT_VERSION: ${{ needs.check-releasable.outputs.next_version }}
         run: |
-          git-cliff --strip all --latest > /tmp/release-notes.txt
+          # Generate changelog for the upcoming version
+          git-cliff --strip all --unreleased --tag $NEXT_VERSION > /tmp/release-notes.txt
           cat /tmp/release-notes.txt
 
       - name: Download all artifacts
@@ -240,6 +285,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ needs.check-releasable.outputs.next_version }}
+          name: ${{ needs.check-releasable.outputs.next_version }}
           body_path: /tmp/release-notes.txt
           files: release-files/*
           draft: false
