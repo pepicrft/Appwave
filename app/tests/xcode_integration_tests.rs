@@ -260,3 +260,96 @@ async fn test_xcode_schemes_endpoint_missing_path_field() {
     // Axum returns 422 Unprocessable Entity when required JSON fields are missing
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+// Tests with real Xcode fixture
+
+fn fixture_path(relative: &str) -> String {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    format!("{}/tests/fixtures/xcode/{}", manifest_dir, relative)
+}
+
+#[tokio::test]
+async fn test_real_xcode_project_discovery() {
+    let app = create_test_app().await;
+    let project_path = fixture_path("Plasma/Plasma.xcodeproj");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/xcode/schemes")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "path": project_path
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+
+    // Verify the response structure
+    assert_eq!(json["project_type"], "project");
+    assert!(json["schemes"].is_array());
+    assert!(json["targets"].is_array());
+    assert!(json["configurations"].is_array());
+
+    // Verify expected values from the fixture
+    let schemes = json["schemes"].as_array().unwrap();
+    assert_eq!(schemes.len(), 1);
+    assert_eq!(schemes[0], "Plasma Project");
+
+    let targets = json["targets"].as_array().unwrap();
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0], "Plasma");
+
+    let configurations = json["configurations"].as_array().unwrap();
+    assert_eq!(configurations.len(), 2);
+    assert!(configurations.contains(&json!("Debug")));
+    assert!(configurations.contains(&json!("Release")));
+}
+
+#[tokio::test]
+async fn test_real_xcode_project_discovery_from_directory() {
+    let app = create_test_app().await;
+    let directory_path = fixture_path("Plasma");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/xcode/schemes")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "path": directory_path
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+
+    // Should discover the project in the directory
+    assert_eq!(json["project_type"], "project");
+
+    let schemes = json["schemes"].as_array().unwrap();
+    assert_eq!(schemes[0], "Plasma Project");
+}
