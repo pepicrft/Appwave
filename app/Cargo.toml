@@ -22,6 +22,9 @@ clap = { version = "4", features = ["derive"] }
 # Web server
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures = "0.3"
+async-stream = "0.3"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
