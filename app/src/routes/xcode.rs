@@ -1,7 +1,7 @@
 use crate::xcode;
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::path::Path;
 
 #[derive(Debug, Deserialize)]
@@ -14,19 +14,7 @@ pub async fn get_xcode_schemes(Json(request): Json<XcodeSchemesRequest>) -> impl
     let path = Path::new(&request.path);
 
     match xcode::discover_project(path).await {
-        Ok(project) => (
-            StatusCode::OK,
-            Json(json!({
-                "path": project.path,
-                "project_type": match project.project_type {
-                    xcode::ProjectType::Project => "project",
-                    xcode::ProjectType::Workspace => "workspace",
-                },
-                "schemes": project.schemes,
-                "targets": project.targets,
-                "configurations": project.configurations,
-            })),
-        ),
-        Err(error) => (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))),
+        Ok(project) => (StatusCode::OK, Json(Value::from(serde_json::to_value(project).unwrap()))).into_response(),
+        Err(error) => (StatusCode::BAD_REQUEST, Json(json!({ "error": error }))).into_response(),
     }
 }
