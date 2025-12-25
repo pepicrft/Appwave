@@ -51,14 +51,6 @@ pub struct BuildProduct {
 #[serde(rename_all = "lowercase")]
 pub enum ProductType {
     Application,
-    Framework,
-    StaticLibrary,
-    DynamicLibrary,
-    Bundle,
-    UnitTest,
-    UITest,
-    AppExtension,
-    Unknown,
 }
 
 /// Build an Xcode scheme for iOS Simulator with code signing disabled
@@ -189,36 +181,20 @@ async fn find_build_products(build_dir: &str) -> Result<Vec<BuildProduct>, Build
     {
         let file_name = entry.file_name();
         let file_name_str = file_name.to_string_lossy();
+
+        // Only include .app files
+        if !file_name_str.ends_with(".app") {
+            continue;
+        }
+
         let path = entry.path();
         let path_str = path.to_string_lossy().to_string();
-
-        let (product_type, is_launchable) = if file_name_str.ends_with(".app") {
-            (ProductType::Application, true)
-        } else if file_name_str.ends_with(".framework") {
-            (ProductType::Framework, false)
-        } else if file_name_str.ends_with(".a") {
-            (ProductType::StaticLibrary, false)
-        } else if file_name_str.ends_with(".dylib") {
-            (ProductType::DynamicLibrary, false)
-        } else if file_name_str.ends_with(".bundle") {
-            (ProductType::Bundle, false)
-        } else if file_name_str.ends_with(".xctest") {
-            if file_name_str.to_lowercase().contains("uitest") {
-                (ProductType::UITest, false)
-            } else {
-                (ProductType::UnitTest, false)
-            }
-        } else if file_name_str.ends_with(".appex") {
-            (ProductType::AppExtension, false)
-        } else {
-            continue;
-        };
 
         products.push(BuildProduct {
             name: file_name_str.to_string(),
             path: path_str,
-            product_type,
-            is_launchable,
+            product_type: ProductType::Application,
+            is_launchable: true,
         });
     }
 
@@ -424,33 +400,22 @@ mod tests {
                 is_launchable: true,
             },
             BuildProduct {
-                name: "MyFramework.framework".to_string(),
-                path: "/path/to/MyFramework.framework".to_string(),
-                product_type: ProductType::Framework,
-                is_launchable: false,
-            },
-            BuildProduct {
-                name: "MyTests.xctest".to_string(),
-                path: "/path/to/MyTests.xctest".to_string(),
-                product_type: ProductType::UnitTest,
-                is_launchable: false,
+                name: "AnotherApp.app".to_string(),
+                path: "/path/to/AnotherApp.app".to_string(),
+                product_type: ProductType::Application,
+                is_launchable: true,
             },
         ];
 
         let launchable = get_launchable_products(&products);
-        assert_eq!(launchable.len(), 1);
+        assert_eq!(launchable.len(), 2);
         assert_eq!(launchable[0].name, "MyApp.app");
         assert_eq!(launchable[0].product_type, ProductType::Application);
     }
 
     #[test]
     fn test_get_launchable_products_empty() {
-        let products = vec![BuildProduct {
-            name: "MyFramework.framework".to_string(),
-            path: "/path/to/MyFramework.framework".to_string(),
-            product_type: ProductType::Framework,
-            is_launchable: false,
-        }];
+        let products = vec![];
 
         let launchable = get_launchable_products(&products);
         assert_eq!(launchable.len(), 0);
