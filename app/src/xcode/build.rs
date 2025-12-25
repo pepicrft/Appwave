@@ -62,10 +62,7 @@ pub enum ProductType {
 }
 
 /// Build an Xcode scheme for iOS Simulator with code signing disabled
-pub async fn build_scheme(
-    project_path: &Path,
-    scheme: &str,
-) -> Result<BuildResult, BuildError> {
+pub async fn build_scheme(project_path: &Path, scheme: &str) -> Result<BuildResult, BuildError> {
     let project = projects::detect_project(project_path).ok_or(BuildError::ProjectNotFound)?;
 
     if !matches!(project.project_type, projects::ProjectType::Xcode) {
@@ -188,7 +185,9 @@ pub fn get_launchable_products(products: &[BuildProduct]) -> Vec<BuildProduct> {
 }
 
 /// Get launchable products from a build directory
-pub async fn get_launchable_products_from_dir(build_dir: &str) -> Result<Vec<BuildProduct>, BuildError> {
+pub async fn get_launchable_products_from_dir(
+    build_dir: &str,
+) -> Result<Vec<BuildProduct>, BuildError> {
     let all_products = find_build_products(build_dir).await?;
     Ok(get_launchable_products(&all_products))
 }
@@ -254,13 +253,15 @@ pub async fn build_scheme_stream(
 
     let mut child = cmd.spawn()?;
 
-    let stdout = child.stdout.take().ok_or_else(|| {
-        BuildError::ParseError("Failed to capture stdout".to_string())
-    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| BuildError::ParseError("Failed to capture stdout".to_string()))?;
 
-    let stderr = child.stderr.take().ok_or_else(|| {
-        BuildError::ParseError("Failed to capture stderr".to_string())
-    })?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| BuildError::ParseError("Failed to capture stderr".to_string()))?;
 
     let stream = async_stream::stream! {
         yield Ok(BuildEvent::Started {
@@ -366,14 +367,12 @@ mod tests {
 
     #[test]
     fn test_get_launchable_products_empty() {
-        let products = vec![
-            BuildProduct {
-                name: "MyFramework.framework".to_string(),
-                path: "/path/to/MyFramework.framework".to_string(),
-                product_type: ProductType::Framework,
-                is_launchable: false,
-            },
-        ];
+        let products = vec![BuildProduct {
+            name: "MyFramework.framework".to_string(),
+            path: "/path/to/MyFramework.framework".to_string(),
+            product_type: ProductType::Framework,
+            is_launchable: false,
+        }];
 
         let launchable = get_launchable_products(&products);
         assert_eq!(launchable.len(), 0);

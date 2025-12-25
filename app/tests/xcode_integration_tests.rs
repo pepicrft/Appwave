@@ -465,7 +465,10 @@ async fn test_build_scheme_stream_with_fixture() {
     // Verify we got the expected events
     assert!(has_started, "Should have started event");
     assert!(has_completed, "Should have completed event");
-    assert!(events.len() > 2, "Should have multiple events including output");
+    assert!(
+        events.len() > 2,
+        "Should have multiple events including output"
+    );
 }
 
 #[tokio::test]

@@ -1,7 +1,10 @@
 use crate::xcode;
 use axum::{
     http::StatusCode,
-    response::{sse::{Event, KeepAlive, Sse}, IntoResponse},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse,
+    },
     Json,
 };
 use futures::stream::StreamExt;
@@ -60,9 +63,11 @@ pub async fn get_launchable_products(
     Json(request): Json<GetLaunchableProductsRequest>,
 ) -> impl IntoResponse {
     match xcode::get_launchable_products_from_dir(&request.build_dir).await {
-        Ok(products) => {
-            (StatusCode::OK, Json(serde_json::to_value(products).unwrap())).into_response()
-        }
+        Ok(products) => (
+            StatusCode::OK,
+            Json(serde_json::to_value(products).unwrap()),
+        )
+            .into_response(),
         Err(error) => (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": error.to_string() })),
@@ -74,7 +79,10 @@ pub async fn get_launchable_products(
 /// Stream build output via Server-Sent Events
 pub async fn build_scheme_stream(
     Json(request): Json<BuildSchemeRequest>,
-) -> Result<Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<
+    Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>>,
+    (StatusCode, Json<serde_json::Value>),
+> {
     let path = Path::new(&request.path);
 
     let event_stream = match xcode::build_scheme_stream(path, &request.scheme).await {
@@ -87,16 +95,14 @@ pub async fn build_scheme_stream(
         }
     };
 
-    let sse_stream = event_stream.map(|result| {
-        match result {
-            Ok(event) => {
-                let json_data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
-                Ok(Event::default().data(json_data))
-            }
-            Err(_) => {
-                let error_json = json!({"type": "error", "message": "Stream error"}).to_string();
-                Ok(Event::default().data(error_json))
-            }
+    let sse_stream = event_stream.map(|result| match result {
+        Ok(event) => {
+            let json_data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
+            Ok(Event::default().data(json_data))
+        }
+        Err(_) => {
+            let error_json = json!({"type": "error", "message": "Stream error"}).to_string();
+            Ok(Event::default().data(error_json))
         }
     });
 
