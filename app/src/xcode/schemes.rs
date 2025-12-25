@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use tokio::process::Command;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct XcodeProject {
@@ -33,8 +33,8 @@ struct ProjectInfo {
     targets: Vec<String>,
 }
 
-pub fn discover_project(path: &Path) -> Result<XcodeProject, String> {
-    let (project_path, project_type) = find_project_or_workspace(path)?;
+pub async fn discover_project(path: &Path) -> Result<XcodeProject, String> {
+    let (project_path, project_type) = find_project_or_workspace(path).await?;
 
     let output = match project_type {
         ProjectType::Workspace => Command::new("xcodebuild")
@@ -43,6 +43,7 @@ pub fn discover_project(path: &Path) -> Result<XcodeProject, String> {
             .arg("-list")
             .arg("-json")
             .output()
+            .await
             .map_err(|e| format!("Failed to execute xcodebuild: {}", e))?,
         ProjectType::Project => Command::new("xcodebuild")
             .arg("-project")
@@ -50,6 +51,7 @@ pub fn discover_project(path: &Path) -> Result<XcodeProject, String> {
             .arg("-list")
             .arg("-json")
             .output()
+            .await
             .map_err(|e| format!("Failed to execute xcodebuild: {}", e))?,
     };
 
@@ -77,8 +79,12 @@ pub fn discover_project(path: &Path) -> Result<XcodeProject, String> {
     })
 }
 
-fn find_project_or_workspace(path: &Path) -> Result<(PathBuf, ProjectType), String> {
-    if !path.exists() {
+async fn find_project_or_workspace(path: &Path) -> Result<(PathBuf, ProjectType), String> {
+    // Check if path exists
+    if !tokio::fs::try_exists(path)
+        .await
+        .map_err(|e| format!("Failed to check path existence: {}", e))?
+    {
         return Err(format!("Path does not exist: {}", path.display()));
     }
 
@@ -92,7 +98,11 @@ fn find_project_or_workspace(path: &Path) -> Result<(PathBuf, ProjectType), Stri
     }
 
     // Otherwise, search in the directory
-    let search_dir = if path.is_dir() {
+    let metadata = tokio::fs::metadata(path)
+        .await
+        .map_err(|e| format!("Failed to read path metadata: {}", e))?;
+
+    let search_dir = if metadata.is_dir() {
         path
     } else {
         path.parent()
@@ -100,17 +110,21 @@ fn find_project_or_workspace(path: &Path) -> Result<(PathBuf, ProjectType), Stri
     };
 
     // Read directory entries once
-    let entries: Vec<PathBuf> = std::fs::read_dir(search_dir)
-        .map_err(|e| format!("Failed to read directory: {}", e))?
-        .map(|entry_res| {
-            entry_res
-                .map(|entry| entry.path())
-                .map_err(|e| format!("Failed to read entry: {}", e))
-        })
-        .collect::<Result<_, _>>()?;
+    let mut entries = tokio::fs::read_dir(search_dir)
+        .await
+        .map_err(|e| format!("Failed to read directory: {}", e))?;
+
+    let mut paths = Vec::new();
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| format!("Failed to read entry: {}", e))?
+    {
+        paths.push(entry.path());
+    }
 
     // Prefer workspace over project
-    for entry_path in &entries {
+    for entry_path in &paths {
         if let Some(ext) = entry_path.extension() {
             if ext == "xcworkspace" {
                 return Ok((entry_path.clone(), ProjectType::Workspace));
@@ -119,7 +133,7 @@ fn find_project_or_workspace(path: &Path) -> Result<(PathBuf, ProjectType), Stri
     }
 
     // Fall back to project if no workspace found
-    for entry_path in &entries {
+    for entry_path in &paths {
         if let Some(ext) = entry_path.extension() {
             if ext == "xcodeproj" {
                 return Ok((entry_path.clone(), ProjectType::Project));
@@ -165,13 +179,13 @@ mod tests {
         .unwrap();
     }
 
-    #[test]
-    fn test_find_xcodeproj_direct_path() {
+    #[tokio::test]
+    async fn test_find_xcodeproj_direct_path() {
         let dir = create_test_dir();
         create_mock_xcodeproj(dir.path(), "TestApp");
 
         let proj_path = dir.path().join("TestApp.xcodeproj");
-        let result = find_project_or_workspace(&proj_path);
+        let result = find_project_or_workspace(&proj_path).await;
 
         assert!(result.is_ok());
         let (path, project_type) = result.unwrap();
@@ -179,13 +193,13 @@ mod tests {
         assert!(matches!(project_type, ProjectType::Project));
     }
 
-    #[test]
-    fn test_find_xcworkspace_direct_path() {
+    #[tokio::test]
+    async fn test_find_xcworkspace_direct_path() {
         let dir = create_test_dir();
         create_mock_xcworkspace(dir.path(), "TestWorkspace");
 
         let workspace_path = dir.path().join("TestWorkspace.xcworkspace");
-        let result = find_project_or_workspace(&workspace_path);
+        let result = find_project_or_workspace(&workspace_path).await;
 
         assert!(result.is_ok());
         let (path, project_type) = result.unwrap();
@@ -193,12 +207,12 @@ mod tests {
         assert!(matches!(project_type, ProjectType::Workspace));
     }
 
-    #[test]
-    fn test_find_xcodeproj_in_directory() {
+    #[tokio::test]
+    async fn test_find_xcodeproj_in_directory() {
         let dir = create_test_dir();
         create_mock_xcodeproj(dir.path(), "TestApp");
 
-        let result = find_project_or_workspace(dir.path());
+        let result = find_project_or_workspace(dir.path()).await;
 
         assert!(result.is_ok());
         let (path, project_type) = result.unwrap();
@@ -206,12 +220,12 @@ mod tests {
         assert!(matches!(project_type, ProjectType::Project));
     }
 
-    #[test]
-    fn test_find_xcworkspace_in_directory() {
+    #[tokio::test]
+    async fn test_find_xcworkspace_in_directory() {
         let dir = create_test_dir();
         create_mock_xcworkspace(dir.path(), "TestWorkspace");
 
-        let result = find_project_or_workspace(dir.path());
+        let result = find_project_or_workspace(dir.path()).await;
 
         assert!(result.is_ok());
         let (path, project_type) = result.unwrap();
@@ -219,13 +233,13 @@ mod tests {
         assert!(matches!(project_type, ProjectType::Workspace));
     }
 
-    #[test]
-    fn test_workspace_takes_priority_over_project() {
+    #[tokio::test]
+    async fn test_workspace_takes_priority_over_project() {
         let dir = create_test_dir();
         create_mock_xcodeproj(dir.path(), "TestApp");
         create_mock_xcworkspace(dir.path(), "TestWorkspace");
 
-        let result = find_project_or_workspace(dir.path());
+        let result = find_project_or_workspace(dir.path()).await;
 
         assert!(result.is_ok());
         let (path, project_type) = result.unwrap();
@@ -233,30 +247,30 @@ mod tests {
         assert!(matches!(project_type, ProjectType::Workspace));
     }
 
-    #[test]
-    fn test_nonexistent_path() {
-        let result = find_project_or_workspace(Path::new("/nonexistent/path"));
+    #[tokio::test]
+    async fn test_nonexistent_path() {
+        let result = find_project_or_workspace(Path::new("/nonexistent/path")).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("does not exist"));
     }
 
-    #[test]
-    fn test_directory_without_xcode_project() {
+    #[tokio::test]
+    async fn test_directory_without_xcode_project() {
         let dir = create_test_dir();
         fs::write(dir.path().join("README.md"), "# Test").unwrap();
 
-        let result = find_project_or_workspace(dir.path());
+        let result = find_project_or_workspace(dir.path()).await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .contains("No .xcworkspace or .xcodeproj found"));
     }
 
-    #[test]
-    fn test_empty_directory() {
+    #[tokio::test]
+    async fn test_empty_directory() {
         let dir = create_test_dir();
 
-        let result = find_project_or_workspace(dir.path());
+        let result = find_project_or_workspace(dir.path()).await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
