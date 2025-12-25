@@ -6,6 +6,12 @@ use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
+/// Default derived data path for Plasma builds
+const DERIVED_DATA_PATH: &str = "/tmp/plasma-build";
+
+/// Default build products directory
+const BUILD_PRODUCTS_DIR: &str = "/tmp/plasma-build/Build/Products/Debug-iphonesimulator";
+
 #[derive(Debug, thiserror::Error)]
 pub enum BuildError {
     #[error("No Xcode project found at path")]
@@ -91,7 +97,7 @@ pub async fn build_scheme(project_path: &Path, scheme: &str) -> Result<BuildResu
         .arg("CODE_SIGNING_REQUIRED=NO")
         .arg("CODE_SIGNING_ALLOWED=NO")
         .arg("-derivedDataPath")
-        .arg("/tmp/plasma-build");
+        .arg(DERIVED_DATA_PATH);
 
     let output = cmd.output().await?;
 
@@ -108,7 +114,7 @@ pub async fn build_scheme(project_path: &Path, scheme: &str) -> Result<BuildResu
         });
     }
 
-    let build_dir = "/tmp/plasma-build/Build/Products/Debug-iphonesimulator".to_string();
+    let build_dir = BUILD_PRODUCTS_DIR.to_string();
     let products = find_build_products(&build_dir).await?;
 
     Ok(BuildResult {
@@ -153,7 +159,7 @@ async fn find_build_products(build_dir: &str) -> Result<Vec<BuildProduct>, Build
         } else if file_name_str.ends_with(".bundle") {
             (ProductType::Bundle, false)
         } else if file_name_str.ends_with(".xctest") {
-            if file_name_str.contains("UITests") {
+            if file_name_str.to_lowercase().contains("uitest") {
                 (ProductType::UITest, false)
             } else {
                 (ProductType::UnitTest, false)
@@ -247,7 +253,7 @@ pub async fn build_scheme_stream(
         .arg("CODE_SIGNING_REQUIRED=NO")
         .arg("CODE_SIGNING_ALLOWED=NO")
         .arg("-derivedDataPath")
-        .arg("/tmp/plasma-build")
+        .arg(DERIVED_DATA_PATH)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -297,6 +303,7 @@ pub async fn build_scheme_stream(
                         Ok(None) => {},
                         Err(e) => {
                             yield Err(BuildError::ParseError(e.to_string()));
+                            break;
                         }
                     }
                 }
@@ -304,7 +311,7 @@ pub async fn build_scheme_stream(
         }
 
         let status = child.wait().await;
-        let build_dir = "/tmp/plasma-build/Build/Products/Debug-iphonesimulator".to_string();
+        let build_dir = BUILD_PRODUCTS_DIR.to_string();
 
         match status {
             Ok(exit_status) => {

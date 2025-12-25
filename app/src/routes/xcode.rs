@@ -33,9 +33,14 @@ pub async fn discover_project(Json(request): Json<DiscoverProjectRequest>) -> im
     let path = Path::new(&request.path);
 
     match xcode::discover_project(path).await {
-        Ok(project) => {
-            (StatusCode::OK, Json(serde_json::to_value(project).unwrap())).into_response()
-        }
+        Ok(project) => match serde_json::to_value(project) {
+            Ok(json) => (StatusCode::OK, Json(json)).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to serialize response: {}", e) })),
+            )
+                .into_response(),
+        },
         Err(error) => (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": error.to_string() })),
@@ -49,7 +54,14 @@ pub async fn build_scheme(Json(request): Json<BuildSchemeRequest>) -> impl IntoR
     let path = Path::new(&request.path);
 
     match xcode::build_scheme(path, &request.scheme).await {
-        Ok(result) => (StatusCode::OK, Json(serde_json::to_value(result).unwrap())).into_response(),
+        Ok(result) => match serde_json::to_value(result) {
+            Ok(json) => (StatusCode::OK, Json(json)).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to serialize response: {}", e) })),
+            )
+                .into_response(),
+        },
         Err(error) => (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": error.to_string() })),
@@ -63,11 +75,14 @@ pub async fn get_launchable_products(
     Json(request): Json<GetLaunchableProductsRequest>,
 ) -> impl IntoResponse {
     match xcode::get_launchable_products_from_dir(&request.build_dir).await {
-        Ok(products) => (
-            StatusCode::OK,
-            Json(serde_json::to_value(products).unwrap()),
-        )
-            .into_response(),
+        Ok(products) => match serde_json::to_value(products) {
+            Ok(json) => (StatusCode::OK, Json(json)).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to serialize response: {}", e) })),
+            )
+                .into_response(),
+        },
         Err(error) => (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": error.to_string() })),
@@ -97,10 +112,14 @@ pub async fn build_scheme_stream(
 
     let sse_stream = event_stream.map(|result| match result {
         Ok(event) => {
-            let json_data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
+            let json_data = serde_json::to_string(&event).unwrap_or_else(|e| {
+                tracing::error!("Failed to serialize build event: {}", e);
+                json!({"type": "error", "message": "Failed to serialize event"}).to_string()
+            });
             Ok(Event::default().data(json_data))
         }
-        Err(_) => {
+        Err(e) => {
+            tracing::error!("Build stream error: {}", e);
             let error_json = json!({"type": "error", "message": "Stream error"}).to_string();
             Ok(Event::default().data(error_json))
         }
