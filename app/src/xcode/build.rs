@@ -30,12 +30,6 @@ pub enum BuildError {
     NoBuildProducts,
 }
 
-impl BuildError {
-    pub fn to_user_message(&self) -> String {
-        self.to_string()
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BuildResult {
     pub success: bool,
