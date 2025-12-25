@@ -19,6 +19,7 @@ pub fn create_routes(frontend_dir: Option<&str>) -> Router<Arc<AppState>> {
         .route("/projects/recent", get(projects::get_recent_projects))
         .route("/xcode/discover", post(xcode::discover_project))
         .route("/xcode/build", post(xcode::build_scheme))
+        .route("/xcode/build/stream", post(xcode::build_scheme_stream))
         .route(
             "/xcode/launchable-products",
             post(xcode::get_launchable_products),

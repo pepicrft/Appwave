@@ -1,5 +1,10 @@
 use crate::xcode;
-use axum::{http::StatusCode, response::IntoResponse, Json};
+use axum::{
+    http::StatusCode,
+    response::{sse::{Event, KeepAlive, Sse}, IntoResponse},
+    Json,
+};
+use futures::stream::StreamExt;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::Path;
@@ -64,4 +69,36 @@ pub async fn get_launchable_products(
         )
             .into_response(),
     }
+}
+
+/// Stream build output via Server-Sent Events
+pub async fn build_scheme_stream(
+    Json(request): Json<BuildSchemeRequest>,
+) -> Result<Sse<impl futures::Stream<Item = Result<Event, std::convert::Infallible>>>, (StatusCode, Json<serde_json::Value>)> {
+    let path = Path::new(&request.path);
+
+    let event_stream = match xcode::build_scheme_stream(path, &request.scheme).await {
+        Ok(stream) => stream,
+        Err(error) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": error.to_string() })),
+            ));
+        }
+    };
+
+    let sse_stream = event_stream.map(|result| {
+        match result {
+            Ok(event) => {
+                let json_data = serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_string());
+                Ok(Event::default().data(json_data))
+            }
+            Err(_) => {
+                let error_json = json!({"type": "error", "message": "Stream error"}).to_string();
+                Ok(Event::default().data(error_json))
+            }
+        }
+    });
+
+    Ok(Sse::new(sse_stream).keep_alive(KeepAlive::default()))
 }
