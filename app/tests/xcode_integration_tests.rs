@@ -279,6 +279,7 @@ fn fixture_path(relative: &str) -> String {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn test_real_xcode_project_discovery() {
     let app = create_test_app().await;
     let project_path = fixture_path("Plasma/Plasma.xcodeproj");
@@ -329,6 +330,7 @@ async fn test_real_xcode_project_discovery() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "macos")]
 async fn test_real_xcode_project_discovery_from_directory() {
     let app = create_test_app().await;
     let directory_path = fixture_path("Plasma");
