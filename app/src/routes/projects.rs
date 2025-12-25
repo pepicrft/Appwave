@@ -42,17 +42,16 @@ pub async fn validate_project(
     match projects::detect_project(path) {
         Some(project) => {
             // Save to database in the background
-            if let Err(e) = projects::save_project(
-                state.db.conn(),
-                &project.path,
-                &project.name,
-            )
-            .await
+            if let Err(e) =
+                projects::save_project(state.db.conn(), &project.path, &project.name).await
             {
                 tracing::warn!("Failed to save project to database: {}", e);
             }
 
-            (StatusCode::OK, Json(ValidateProjectResponse::Valid(project)))
+            (
+                StatusCode::OK,
+                Json(ValidateProjectResponse::Valid(project)),
+            )
         }
         None => (
             StatusCode::BAD_REQUEST,
@@ -80,12 +79,8 @@ pub async fn get_recent_projects(
     State(state): State<Arc<AppState>>,
     Query(params): Query<RecentProjectsQuery>,
 ) -> impl IntoResponse {
-    match projects::get_recent_projects(
-        state.db.conn(),
-        params.query.as_deref(),
-        params.limit,
-    )
-    .await
+    match projects::get_recent_projects(state.db.conn(), params.query.as_deref(), params.limit)
+        .await
     {
         Ok(projects) => (StatusCode::OK, Json(json!({ "projects": projects }))),
         Err(e) => {

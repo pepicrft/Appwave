@@ -82,20 +82,24 @@ pub async fn discover_project(path: &Path) -> Result<XcodeProject, DiscoveryErro
 
     // Run xcodebuild to get project details
     let output = match project_type {
-        ProjectType::Workspace => Command::new("xcodebuild")
-            .arg("-workspace")
-            .arg(&project.path)
-            .arg("-list")
-            .arg("-json")
-            .output()
-            .await?,
-        ProjectType::Project => Command::new("xcodebuild")
-            .arg("-project")
-            .arg(&project.path)
-            .arg("-list")
-            .arg("-json")
-            .output()
-            .await?,
+        ProjectType::Workspace => {
+            Command::new("xcodebuild")
+                .arg("-workspace")
+                .arg(&project.path)
+                .arg("-list")
+                .arg("-json")
+                .output()
+                .await?
+        }
+        ProjectType::Project => {
+            Command::new("xcodebuild")
+                .arg("-project")
+                .arg(&project.path)
+                .arg("-list")
+                .arg("-json")
+                .output()
+                .await?
+        }
     };
 
     if !output.status.success() {

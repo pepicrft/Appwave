@@ -135,7 +135,6 @@ fn run_desktop(debug: bool) {
                     info!("Application exit requested");
                 }
             });
-        return;
     }
 
     #[cfg(not(target_os = "macos"))]

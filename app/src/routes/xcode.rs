@@ -1,7 +1,7 @@
 use crate::xcode;
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::path::Path;
 
 #[derive(Debug, Deserialize)]
@@ -16,7 +16,7 @@ pub async fn discover_project(Json(request): Json<DiscoverProjectRequest>) -> im
     match xcode::discover_project(path).await {
         Ok(project) => (
             StatusCode::OK,
-            Json(Value::from(serde_json::to_value(project).unwrap())),
+            Json(serde_json::to_value(project).unwrap()),
         )
             .into_response(),
         Err(error) => (

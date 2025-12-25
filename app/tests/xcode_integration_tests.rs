@@ -178,7 +178,8 @@ async fn test_xcode_schemes_endpoint_directory_without_project() {
     // Should return an error for directory without project
     let error = json["error"].as_str().unwrap();
     assert!(
-        error.contains("No .xcworkspace or .xcodeproj found") || error.contains("No Xcode project found"),
+        error.contains("No .xcworkspace or .xcodeproj found")
+            || error.contains("No Xcode project found"),
         "Unexpected error message: {}",
         error
     );
