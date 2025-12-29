@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-#MISE description="Run the frontend dev server"
-#MISE hide=true
-set -e
-
-pnpm --dir frontend dev
