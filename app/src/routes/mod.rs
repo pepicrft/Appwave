@@ -3,6 +3,7 @@ mod projects;
 mod xcode;
 
 use crate::server::AppState;
+use crate::simulator;
 use axum::{
     routing::{get, post},
     Router,
@@ -23,7 +24,11 @@ pub fn create_routes(frontend_dir: Option<&str>) -> Router<Arc<AppState>> {
         .route(
             "/xcode/launchable-products",
             post(xcode::get_launchable_products),
-        );
+        )
+        .route("/simulator/list", get(simulator::list_simulators))
+        .route("/simulator/launch", post(simulator::install_and_launch))
+        .route("/simulator/stream", get(simulator::stream_simulator))
+        .route("/simulator/stream/logs", get(simulator::stream_logs));
 
     let router = Router::new().nest("/api", api_routes);
 

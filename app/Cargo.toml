@@ -53,6 +53,8 @@ tower = "0.5"
 uuid = { version = "1", features = ["v4", "serde"] }
 open = "5"
 chrono = "0.4"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+once_cell = "1.19"
 
 [dev-dependencies]
 tempfile = "3"

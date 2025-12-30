@@ -45,3 +45,11 @@ DerivedData/
 
 # Frameworks (vendored binaries)
 app/Frameworks/
+
+# Vendored binaries (keep scripts, ignore compiled binaries)
+app/bin/fbsimctl
+app/bin/simulator-server-macos
+app/bin/plasma-stream
+
+# Marketing build artifacts
+marketing/build/

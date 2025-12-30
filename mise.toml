@@ -4,3 +4,11 @@ node = "22"
 pnpm = "latest"
 "cargo:tauri-cli" = "latest"
 "cargo:git-cliff" = "latest"
+"ubi:DarthSim/hivemind" = "latest"
+
+[tools."github:cameroncooke/AXe"]
+  version = "1.2.1"
+  matching = "homebrew"
+  exe = "axe"
+  strip_components = 0
+  postinstall = "cd $MISE_TOOL_INSTALL_PATH/Frameworks && for fw in *.framework; do codesign --force -s - \"$fw/Versions/A/${fw%.framework}\"; done && codesign --force -s - $MISE_TOOL_INSTALL_PATH/axe"

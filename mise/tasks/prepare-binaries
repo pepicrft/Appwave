@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#MISE description="Prepare external binaries for bundling"
+set -e
+
+BINARIES_DIR="$MISE_PROJECT_ROOT/app/binaries"
+AXE_INSTALL_PATH="$(dirname "$(mise which axe)")"
+
+echo "Preparing binaries for bundling..."
+
+# Clean and create binaries directory
+rm -rf "$BINARIES_DIR"
+mkdir -p "$BINARIES_DIR"
+
+# Copy axe and its frameworks
+echo "Copying axe from $AXE_INSTALL_PATH..."
+cp "$AXE_INSTALL_PATH/axe" "$BINARIES_DIR/"
+cp -R "$AXE_INSTALL_PATH/Frameworks" "$BINARIES_DIR/"
+
+# Sign the binaries for distribution
+echo "Signing binaries..."
+cd "$BINARIES_DIR/Frameworks"
+for fw in *.framework; do
+  codesign --force -s - "$fw/Versions/A/${fw%.framework}"
+done
+codesign --force -s - "$BINARIES_DIR/axe"
+
+echo "Binaries prepared in $BINARIES_DIR"
+ls -la "$BINARIES_DIR"

@@ -29,7 +29,9 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../frontend/dist": "frontend"
+      "../frontend/dist": "frontend",
+      "binaries/axe": "binaries/axe",
+      "binaries/Frameworks": "binaries/Frameworks"
     },
     "macOS": {
       "minimumSystemVersion": "10.15",

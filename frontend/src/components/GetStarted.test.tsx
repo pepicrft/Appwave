@@ -3,13 +3,13 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { BrowserRouter } from "react-router-dom"
 import { GetStarted } from "./GetStarted"
 
-const mockNavigate = vi.fn()
+const mockSetSearchParams = vi.fn()
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual("react-router-dom")
   return {
     ...actual,
-    useNavigate: () => mockNavigate,
+    useSearchParams: () => [new URLSearchParams(), mockSetSearchParams],
   }
 })
 
@@ -64,9 +64,10 @@ describe("GetStarted", () => {
 
   it("shows error when validation fails", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
       json: () =>
         Promise.resolve({
-          valid: "false",
+          valid: false,
           error: "No Xcode or Android project found",
         }),
     } as Response)
@@ -85,14 +86,15 @@ describe("GetStarted", () => {
       ).toBeInTheDocument()
     })
 
-    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(mockSetSearchParams).not.toHaveBeenCalled()
   })
 
   it("navigates on successful validation", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
       json: () =>
         Promise.resolve({
-          valid: "true",
+          valid: true,
           type: "xcode",
           name: "MyApp",
           path: "/path/to/MyApp.xcworkspace",
@@ -109,9 +111,9 @@ describe("GetStarted", () => {
 
     await waitFor(() => {
       // Should navigate to the resolved project file path, not the input directory
-      expect(mockNavigate).toHaveBeenCalledWith(
-        "/?project=%2Fpath%2Fto%2FMyApp.xcworkspace"
-      )
+      expect(mockSetSearchParams).toHaveBeenCalledWith({
+        project: "/path/to/MyApp.xcworkspace",
+      })
     })
   })
 
@@ -122,8 +124,9 @@ describe("GetStarted", () => {
           setTimeout(
             () =>
               resolve({
+                ok: true,
                 json: () => Promise.resolve({
-                  valid: "true",
+                  valid: true,
                   type: "xcode",
                   name: "MyApp",
                   path: "/path/to/project/MyApp.xcworkspace"
