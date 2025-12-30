@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Play, FolderOpen, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Terminal } from "lucide-react"
+import { MediaCanvas } from "./MediaCanvas"
 
 interface Simulator {
   udid: string
@@ -447,10 +448,15 @@ export function BuildAndRun() {
         {/* Right side - Simulator Stream (full height) */}
         <div className="flex-1 flex items-center justify-center min-w-0 min-h-0 overflow-hidden bg-black/20 rounded-xl">
           {streamUrl ? (
-            <img
+            <MediaCanvas
               src={streamUrl}
-              alt="Simulator stream"
               className="h-full w-auto object-contain rounded-xl shadow-2xl"
+              onStreamError={() => {
+                setStreamLogs((prev) => [
+                  ...prev,
+                  `[${new Date().toLocaleTimeString()}] WARN: Stream reconnecting...`,
+                ])
+              }}
             />
           ) : (
             <div className="flex flex-col items-center justify-center gap-4 text-muted-foreground">
