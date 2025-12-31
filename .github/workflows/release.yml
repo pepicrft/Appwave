@@ -106,8 +106,8 @@ jobs:
 
       - name: Build frontend
         run: |
-          pnpm --dir frontend install
-          pnpm --dir frontend build
+          pnpm --dir app/frontend install
+          pnpm --dir app/frontend build
 
       - name: Build Tauri app
         run: cargo tauri build
@@ -175,8 +175,8 @@ jobs:
 
       - name: Build frontend
         run: |
-          pnpm --dir frontend install
-          pnpm --dir frontend build
+          pnpm --dir app/frontend install
+          pnpm --dir app/frontend build
 
       - name: Build Tauri app
         run: cargo tauri build
@@ -261,8 +261,8 @@ jobs:
 
       - name: Build frontend
         run: |
-          pnpm --dir frontend install
-          pnpm --dir frontend build
+          pnpm --dir app/frontend install
+          pnpm --dir app/frontend build
 
       - name: Build Tauri app
         run: cargo tauri build

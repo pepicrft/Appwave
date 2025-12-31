@@ -29,8 +29,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - run: pnpm --dir frontend install
-      - run: pnpm --dir frontend build
+      - run: pnpm --dir app/frontend install
+      - run: pnpm --dir app/frontend build
 
       - run: cargo check --workspace
 
@@ -69,8 +69,8 @@ jobs:
 
       - run: rustup component add clippy
 
-      - run: pnpm --dir frontend install
-      - run: pnpm --dir frontend build
+      - run: pnpm --dir app/frontend install
+      - run: pnpm --dir app/frontend build
 
       - run: cargo clippy --workspace -- -D warnings
 
@@ -84,9 +84,9 @@ jobs:
         with:
           cache: true
 
-      - run: pnpm --dir frontend install
+      - run: pnpm --dir app/frontend install
 
-      - run: pnpm --dir frontend lint
+      - run: pnpm --dir app/frontend lint
 
   frontend-typecheck:
     name: Frontend Typecheck
@@ -98,9 +98,9 @@ jobs:
         with:
           cache: true
 
-      - run: pnpm --dir frontend install
+      - run: pnpm --dir app/frontend install
 
-      - run: pnpm --dir frontend typecheck
+      - run: pnpm --dir app/frontend typecheck
 
   frontend-build:
     name: Frontend Build
@@ -112,9 +112,9 @@ jobs:
         with:
           cache: true
 
-      - run: pnpm --dir frontend install
+      - run: pnpm --dir app/frontend install
 
-      - run: pnpm --dir frontend build
+      - run: pnpm --dir app/frontend build
 
   rust-test:
     name: Rust Tests
@@ -135,8 +135,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - run: pnpm --dir frontend install
-      - run: pnpm --dir frontend build
+      - run: pnpm --dir app/frontend install
+      - run: pnpm --dir app/frontend build
 
       - run: cargo test --workspace
 
@@ -150,9 +150,9 @@ jobs:
         with:
           cache: true
 
-      - run: pnpm --dir frontend install
+      - run: pnpm --dir app/frontend install
 
-      - run: pnpm --dir frontend test:run
+      - run: pnpm --dir app/frontend test:run
 
   build-app:
     name: Build App (${{ matrix.os }})
@@ -184,9 +184,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - run: pnpm --dir frontend install
+      - run: pnpm --dir app/frontend install
 
-      - run: pnpm --dir frontend build
+      - run: pnpm --dir app/frontend build
 
       - run: cargo tauri build
         working-directory: app
