@@ -218,28 +218,56 @@ pub async fn stream_simulator(Query(query): Query<StreamQuery>) -> Response {
     });
 
     // Stream the MJPEG from simulator-server
+    let log_tx_stream = log_tx.clone();
+    let mut chunk_count: u64 = 0;
     let stream = async_stream::stream! {
         // Use reqwest to fetch the stream from simulator-server
+        let _ = log_tx_stream.send(StreamLogEvent::Debug {
+            message: "Starting reqwest connection to simulator-server...".to_string(),
+        });
+
         match reqwest::Client::new().get(&stream_url).send().await {
             Ok(response) => {
+                let status = response.status();
+                let content_type = response.headers().get("content-type").map(|v| v.to_str().unwrap_or("unknown")).unwrap_or("none");
+                let _ = log_tx_stream.send(StreamLogEvent::Debug {
+                    message: format!("Connected to simulator-server: status={}, content-type={}", status, content_type),
+                });
+
                 let mut bytes_stream = response.bytes_stream();
+                let mut total_bytes: u64 = 0;
+
                 while let Some(chunk_result) = futures::stream::StreamExt::next(&mut bytes_stream).await {
                     match chunk_result {
                         Ok(chunk) => {
+                            total_bytes += chunk.len() as u64;
+                            chunk_count += 1;
+
+                            // Log every 100 chunks to avoid flooding
+                            if chunk_count % 100 == 0 {
+                                let _ = log_tx_stream.send(StreamLogEvent::Debug {
+                                    message: format!("Stream progress: {} chunks, {} bytes total", chunk_count, total_bytes),
+                                });
+                            }
+
                             yield Ok::<_, Infallible>(chunk);
                         }
                         Err(e) => {
-                            let _ = log_tx.send(StreamLogEvent::Error {
-                                message: format!("Stream chunk error: {}", e),
+                            let _ = log_tx_stream.send(StreamLogEvent::Error {
+                                message: format!("Stream chunk error after {} chunks: {}", chunk_count, e),
                             });
                             break;
                         }
                     }
                 }
+
+                let _ = log_tx_stream.send(StreamLogEvent::Info {
+                    message: format!("Stream ended after {} chunks, {} bytes", chunk_count, total_bytes),
+                });
             }
             Err(e) => {
-                let _ = log_tx.send(StreamLogEvent::Error {
-                    message: format!("Failed to fetch stream from simulator-server: {}", e),
+                let _ = log_tx_stream.send(StreamLogEvent::Error {
+                    message: format!("Failed to connect to simulator-server: {}", e),
                 });
             }
         }
@@ -251,7 +279,18 @@ pub async fn stream_simulator(Query(query): Query<StreamQuery>) -> Response {
         header::CONTENT_TYPE,
         "multipart/x-mixed-replace; boundary=--mjpegstream".parse().unwrap(),
     );
-    headers.insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
+    headers.insert(header::CACHE_CONTROL, "no-cache, no-store, must-revalidate".parse().unwrap());
+    headers.insert(header::PRAGMA, "no-cache".parse().unwrap());
+    headers.insert(header::EXPIRES, "0".parse().unwrap());
+    // CORS headers for cross-origin image loading
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+    headers.insert(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, OPTIONS".parse().unwrap());
+    headers.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, "*".parse().unwrap());
+
+    let _ = log_tx.send(StreamLogEvent::Debug {
+        message: "Response headers set, starting stream...".to_string(),
+    });
+
     response
 }
 
