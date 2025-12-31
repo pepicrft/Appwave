@@ -5,7 +5,7 @@ import Darwin
 
 class CommandHandler {
     typealias CommandCallback = (Command) -> Void
-    
+
     enum Command {
         case rotate(String)
         case touch(TouchType, [(Double, Double)])
@@ -15,44 +15,54 @@ class CommandHandler {
         case shutdown
         case unknown
     }
-    
+
     enum TouchType: String {
         case began = "began"
         case moved = "moved"
         case ended = "ended"
     }
-    
+
     enum ButtonType: String {
         case home = "home"
         case lock = "lock"
         case sideButton = "side"
     }
-    
+
     enum Direction: String {
         case down = "down"
         case up = "up"
     }
-    
+
     private let commandQueue = DispatchQueue(label: "com.simulator-server.commands")
     private var callback: CommandCallback?
-    
+    private var commandCount: UInt64 = 0
+
+    init() {
+        Logger.debug("CommandHandler initialized")
+    }
+
     func start(callback: @escaping CommandCallback) {
         self.callback = callback
-        
+        Logger.info("CommandHandler started, listening on stdin")
+
         // Read commands from stdin in background
         commandQueue.async { [weak self] in
             self?.readCommands()
         }
     }
-    
+
     private func readCommands() {
         let fileHandle = FileHandle.standardInput
-        
+        Logger.debug("Command reader loop started")
+
         while true {
             if let line = fileHandle.readLineString() {
+                commandCount += 1
+                Logger.debug("Received command #\(commandCount): '\(line)'")
                 let command = parseCommand(line)
                 callback?(command)
             } else {
+                Logger.info("stdin closed, stopping command reader (total commands: \(commandCount))")
                 break
             }
         }

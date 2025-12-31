@@ -28,120 +28,155 @@ func main() {
     var quality: Float = 0.7
     var port: UInt16 = 0
 
+    Logger.info("Parsing command line arguments...")
+
     var args = CommandLine.arguments.dropFirst()
     while let arg = args.popFirst() {
         switch arg {
         case "--udid":
             udid = args.popFirst()
+            Logger.debug("UDID: \(udid ?? "nil")")
         case "--fps":
             if let val = args.popFirst(), let intVal = Int(val) {
                 fps = min(120, max(1, intVal))
+                Logger.debug("FPS: \(fps)")
             }
         case "--quality":
             if let val = args.popFirst(), let fltVal = Float(val) {
                 quality = min(1.0, max(0.1, fltVal))
+                Logger.debug("Quality: \(quality)")
             }
         case "--port":
             if let val = args.popFirst(), let portVal = UInt16(val) {
                 port = portVal
+                Logger.debug("Port: \(port)")
             }
         case "--help", "-h":
             printUsage()
             exit(0)
         default:
-            break
+            Logger.warn("Unknown argument: \(arg)")
         }
     }
 
     guard let udid = udid else {
-        fputs("Error: --udid is required\n", stderr)
+        Logger.error("--udid is required")
         printUsage()
         exit(1)
     }
 
-    fputs("Starting simulator-server for \(udid)\n", stderr)
-    fputs("FPS: \(fps), Quality: \(quality)\n", stderr)
+    Logger.info("Starting simulator-server")
+    Logger.info("  UDID: \(udid)")
+    Logger.info("  FPS: \(fps)")
+    Logger.info("  Quality: \(quality)")
+    Logger.info("  Port: \(port == 0 ? "auto" : String(port))")
 
     // Initialize CoreSimulator bridge
+    Logger.info("Initializing CoreSimulator bridge...")
     let bridge = CoreSimulatorBridge(udid: udid)
-    
+
     // Initialize HTTP server
+    Logger.info("Initializing HTTP server...")
     let httpServer = HTTPServer(port: port)
     guard let boundPort = httpServer.start() else {
-        fputs("Error: Failed to start HTTP server\n", stderr)
+        Logger.error("Failed to start HTTP server")
         exit(1)
     }
-    
+
     let streamURL = "http://127.0.0.1:\(boundPort)/stream.mjpeg"
-    
+    Logger.info("HTTP server started on port \(boundPort)")
+    Logger.info("Stream URL: \(streamURL)")
+
     // Initialize command handler
+    Logger.info("Initializing command handler...")
     let commandHandler = CommandHandler()
-    
+
     // State for streaming
     var frameCount: UInt64 = 0
+    var encodedFrameCount: UInt64 = 0
     let startTime = CFAbsoluteTimeGetCurrent()
     var lastFrameTime = startTime
     var lastFPSReportTime = startTime
     let frameInterval = 1.0 / Double(fps)
-    
+
     var fpsReporting = false
-    
+
     // Start command handler
+    Logger.info("Starting command handler...")
     commandHandler.start { command in
         switch command {
         case .rotate(let rotation):
-            fputs("Command: rotate \(rotation)\n", stderr)
+            Logger.info("Command received: rotate \(rotation)")
         case .touch(let type, let points):
-            fputs("Command: touch \(type.rawValue) at \(points)\n", stderr)
+            Logger.debug("Command received: touch \(type.rawValue) at \(points)")
         case .button(let button, let direction):
-            fputs("Command: \(button.rawValue) button \(direction.rawValue)\n", stderr)
+            Logger.info("Command received: \(button.rawValue) button \(direction.rawValue)")
         case .key(let code, let direction):
-            fputs("Command: key \(code) \(direction.rawValue)\n", stderr)
+            Logger.debug("Command received: key \(code) \(direction.rawValue)")
         case .fps(let enabled):
-            fputs("Command: fps reporting \(enabled ? "enabled" : "disabled")\n", stderr)
+            Logger.info("Command received: fps reporting \(enabled ? "enabled" : "disabled")")
             fpsReporting = enabled
         case .shutdown:
-            fputs("Command: shutdown\n", stderr)
+            Logger.info("Command received: shutdown")
             exit(0)
         case .unknown:
-            fputs("Command: unknown\n", stderr)
+            Logger.warn("Command received: unknown")
         }
     }
-    
+
     // Initialize encoder once with initial surface size
     var encoder: JPEGEncoder?
-    
+
     // Start monitoring simulator surface
+    Logger.info("Starting CoreSimulator bridge...")
     let bridgeStarted = bridge.start { surface in
-        guard let surface = surface else { return }
-        
+        guard let surface = surface else {
+            Logger.warn("Received nil surface from bridge")
+            return
+        }
+
         // Encode JPEG and submit to HTTP server
         let width = IOSurfaceGetWidth(surface)
         let height = IOSurfaceGetHeight(surface)
-        
+
         // Create encoder on first surface, or recreate if dimensions change
-        if encoder == nil || encoder?.width != width || encoder?.height != height {
+        if encoder == nil {
+            Logger.info("Creating JPEG encoder: \(width)x\(height), quality=\(quality)")
+            encoder = JPEGEncoder(width: width, height: height, quality: quality)
+        } else if encoder?.width != width || encoder?.height != height {
+            Logger.info("Recreating JPEG encoder due to size change: \(width)x\(height)")
             encoder = JPEGEncoder(width: width, height: height, quality: quality)
         }
-        
+
         if let encoder = encoder,
            let pixelBuffer = createPixelBuffer(from: surface),
            let jpegData = encoder.encode(pixelBuffer) {
+            encodedFrameCount += 1
             httpServer.submitFrame(jpegData)
+
+            // Log every 60 frames
+            if encodedFrameCount % 60 == 0 {
+                Logger.debug("Encoded frame \(encodedFrameCount), size: \(jpegData.count) bytes")
+            }
+        } else {
+            Logger.warn("Failed to encode frame")
         }
     }
-    
+
     guard bridgeStarted else {
-        fputs("Error: Failed to start CoreSimulator bridge\n", stderr)
+        Logger.error("Failed to start CoreSimulator bridge")
         exit(1)
     }
-    
-    // Output stream_ready with URL
+
+    Logger.info("CoreSimulator bridge started successfully")
+
+    // Output stream_ready with URL (this is parsed by the Rust backend)
     print("stream_ready \(streamURL)")
     fflush(stdout)
-    
-    fputs("Streaming started...\n", stderr)
-    
+    Logger.info("Sent stream_ready signal")
+
+    Logger.info("Entering main streaming loop...")
+
     // Main loop for frame timing and FPS reporting
     while true {
         // Precise frame timing using spin-wait for the last microseconds
@@ -154,7 +189,7 @@ func main() {
         }
         lastFrameTime = targetTime
         frameCount += 1
-        
+
         // Report FPS periodically
         if fpsReporting && CFAbsoluteTimeGetCurrent() - lastFPSReportTime >= 1.0 {
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
@@ -162,6 +197,7 @@ func main() {
             let fpsReport = """
             {
               "frame_count": \(frameCount),
+              "encoded_frames": \(encodedFrameCount),
               "fps": \(String(format: "%.1f", actualFps)),
               "elapsed": \(String(format: "%.2f", elapsed))
             }
@@ -170,12 +206,13 @@ func main() {
             fflush(stdout)
             lastFPSReportTime = CFAbsoluteTimeGetCurrent()
         }
-        
-        // Debug output periodically
+
+        // Debug output periodically (every second at target fps)
         if frameCount % UInt64(fps) == 0 {
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
             let actualFps = Double(frameCount) / elapsed
-            fputs("Frames: \(frameCount), FPS: \(String(format: "%.1f", actualFps))\n", stderr)
+            let encodedFps = Double(encodedFrameCount) / elapsed
+            Logger.debug("Stats: frames=\(frameCount), encoded=\(encodedFrameCount), fps=\(String(format: "%.1f", actualFps)), encoded_fps=\(String(format: "%.1f", encodedFps))")
         }
     }
 }

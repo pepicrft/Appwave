@@ -14,11 +14,17 @@ class JPEGEncoder {
     private let semaphore = DispatchSemaphore(value: 0)
     let width: Int
     let height: Int
+    private var encodeCount: UInt64 = 0
+    private var hwEncodeCount: UInt64 = 0
+    private var swEncodeCount: UInt64 = 0
+    private var totalEncodedBytes: UInt64 = 0
 
     init(width: Int, height: Int, quality: Float) {
         self.width = width
         self.height = height
         self.quality = quality
+
+        Logger.info("Creating JPEGEncoder: \(width)x\(height), quality=\(quality)")
 
         var session: VTCompressionSession?
         let status = VTCompressionSessionCreate(
@@ -38,9 +44,11 @@ class JPEGEncoder {
 
         if status == noErr, let session = session {
             self.compressionSession = session
-
             VTSessionSetProperty(session, key: kVTCompressionPropertyKey_Quality, value: quality as CFNumber)
             VTCompressionSessionPrepareToEncodeFrames(session)
+            Logger.info("Hardware JPEG encoder initialized successfully")
+        } else {
+            Logger.warn("Failed to create hardware encoder (status=\(status)), will use CoreGraphics fallback")
         }
     }
 
@@ -48,9 +56,12 @@ class JPEGEncoder {
         if let session = compressionSession {
             VTCompressionSessionInvalidate(session)
         }
+        Logger.info("JPEGEncoder destroyed (total: \(encodeCount) frames, HW: \(hwEncodeCount), SW: \(swEncodeCount), bytes: \(totalEncodedBytes))")
     }
 
     func encode(_ pixelBuffer: CVPixelBuffer) -> Data? {
+        encodeCount += 1
+
         guard let session = compressionSession else {
             return encodeWithCoreGraphics(pixelBuffer)
         }
@@ -66,7 +77,10 @@ class JPEGEncoder {
             frameProperties: nil,
             infoFlagsOut: nil
         ) { [weak self] status, _, sampleBuffer in
-            guard status == noErr, let sampleBuffer = sampleBuffer else { return }
+            guard status == noErr, let sampleBuffer = sampleBuffer else {
+                Logger.warn("Hardware encode callback failed: status=\(status)")
+                return
+            }
 
             if let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) {
                 var length = 0
@@ -82,13 +96,25 @@ class JPEGEncoder {
 
         if status == noErr {
             _ = semaphore.wait(timeout: .now() + 0.1)
-            return resultData
+            if let data = resultData {
+                hwEncodeCount += 1
+                totalEncodedBytes += UInt64(data.count)
+
+                // Log every 60 frames
+                if hwEncodeCount % 60 == 0 {
+                    Logger.debug("HW encoded frame #\(hwEncodeCount): \(data.count) bytes")
+                }
+                return data
+            }
         }
 
+        Logger.debug("Hardware encode failed (status=\(status)), falling back to CoreGraphics")
         return encodeWithCoreGraphics(pixelBuffer)
     }
 
     private func encodeWithCoreGraphics(_ pixelBuffer: CVPixelBuffer) -> Data? {
+        swEncodeCount += 1
+
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
@@ -107,15 +133,18 @@ class JPEGEncoder {
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
         ) else {
+            Logger.error("Failed to create CGContext for CoreGraphics encoding")
             return nil
         }
 
         guard let cgImage = context.makeImage() else {
+            Logger.error("Failed to create CGImage from context")
             return nil
         }
 
         let mutableData = CFDataCreateMutable(nil, 0)!
         guard let destination = CGImageDestinationCreateWithData(mutableData, "public.jpeg" as CFString, 1, nil) else {
+            Logger.error("Failed to create image destination")
             return nil
         }
 
@@ -125,10 +154,19 @@ class JPEGEncoder {
         CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
 
         guard CGImageDestinationFinalize(destination) else {
+            Logger.error("Failed to finalize image destination")
             return nil
         }
 
-        return mutableData as Data
+        let data = mutableData as Data
+        totalEncodedBytes += UInt64(data.count)
+
+        // Log every 60 software encodes
+        if swEncodeCount % 60 == 0 {
+            Logger.debug("SW encoded frame #\(swEncodeCount): \(data.count) bytes (\(width)x\(height))")
+        }
+
+        return data
     }
 }
 

@@ -88,19 +88,24 @@ impl SimulatorSession {
             .await
             .map_err(|e| e.to_string())?;
 
-        // Log stderr in background
+        // Log stderr in background - this is where all the Swift Logger output goes
         if let Some(stderr) = child.stderr.take() {
             let log_tx_stderr = log_tx.clone();
+            let udid_for_stderr = udid.clone();
             tokio::spawn(async move {
                 let reader = tokio::io::BufReader::new(stderr);
                 let mut lines = tokio::io::AsyncBufReadExt::lines(reader);
                 while let Ok(Some(line)) = lines.next_line().await {
                     if !line.is_empty() {
+                        // Log to tracing so it appears in terminal
+                        info!("[simulator-server stderr] {}", line);
+                        // Also broadcast to SSE log stream
                         let _ = log_tx_stderr.send(StreamLogEvent::Debug {
                             message: format!("simulator-server stderr: {}", line),
                         });
                     }
                 }
+                info!("[simulator-server {}] stderr closed", udid_for_stderr);
             });
         }
 
@@ -121,30 +126,48 @@ impl SimulatorSession {
     ) -> Result<String, String> {
         use tokio::io::{AsyncBufReadExt, BufReader};
 
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
+        let reader = BufReader::new(stdout);
+        let mut lines = reader.lines();
 
         // Read until we find "stream_ready <URL>"
         loop {
-            line.clear();
-            reader.read_line(&mut line)
-                .await
-                .map_err(|e| format!("Failed to read from simulator-server: {}", e))?;
+            match lines.next_line().await {
+                Ok(Some(line)) => {
+                    let trimmed = line.trim();
+                    info!("[simulator-server stdout] {}", trimmed);
+                    let _ = log_tx.send(StreamLogEvent::Debug {
+                        message: format!("simulator-server stdout: {}", trimmed),
+                    });
 
-            if line.is_empty() {
-                return Err("simulator-server closed without sending stream_ready".to_string());
-            }
+                    if trimmed.starts_with("stream_ready ") {
+                        let url = trimmed.strip_prefix("stream_ready ")
+                            .ok_or_else(|| "Invalid stream_ready format".to_string())?
+                            .to_string();
 
-            let trimmed = line.trim();
-            let _ = log_tx.send(StreamLogEvent::Debug {
-                message: format!("simulator-server: {}", trimmed),
-            });
+                        // Continue reading stdout in background after stream_ready
+                        let log_tx_clone = log_tx.clone();
+                        tokio::spawn(async move {
+                            while let Ok(Some(line)) = lines.next_line().await {
+                                let trimmed = line.trim();
+                                if !trimmed.is_empty() {
+                                    info!("[simulator-server stdout] {}", trimmed);
+                                    let _ = log_tx_clone.send(StreamLogEvent::Debug {
+                                        message: format!("simulator-server stdout: {}", trimmed),
+                                    });
+                                }
+                            }
+                            info!("[simulator-server] stdout closed");
+                        });
 
-            if trimmed.starts_with("stream_ready ") {
-                let url = trimmed.strip_prefix("stream_ready ")
-                    .ok_or_else(|| "Invalid stream_ready format".to_string())?
-                    .to_string();
-                return Ok(url);
+                        return Ok(url);
+                    }
+                }
+                Ok(None) => {
+                    return Err("simulator-server closed without sending stream_ready".to_string());
+                }
+                Err(e) => {
+                    return Err(format!("Failed to read from simulator-server: {}", e));
+                }
             }
         }
     }
