@@ -2,14 +2,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "simulator-server",
+    name: "PlasmaTools",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "simulator-server", targets: ["simulator-server"])
+        .executable(name: "simulator-server", targets: ["SimulatorServer"])
     ],
     targets: [
         .executableTarget(
-            name: "simulator-server",
+            name: "SimulatorServer",
+            path: "Sources/SimulatorServer",
             linkerSettings: [
                 .linkedFramework("CoreSimulator", .when(platforms: [.macOS])),
                 .linkedFramework("IOSurface"),

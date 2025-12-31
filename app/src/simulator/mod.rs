@@ -333,24 +333,17 @@ fn find_simulator_server_binary() -> Option<PathBuf> {
         }
     }
 
-    // 2. Bundled binary in app/bin (for development)
-    let dev_bin = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(|p| {
-            let tools_server = p.join("tools").join("simulator-server").join(".build").join("debug").join("simulator-server");
-            if tools_server.exists() {
-                return Some(tools_server);
-            }
-            
-            let tools_server_release = p.join("tools").join("simulator-server").join(".build").join("release").join("simulator-server");
-            if tools_server_release.exists() {
-                return Some(tools_server_release);
-            }
-            
-            None
-        });
-    if dev_bin.is_some() {
-        return dev_bin;
+    // 2. Development: swift/.build/debug/simulator-server or swift/.build/release/simulator-server
+    if let Some(project_root) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent() {
+        let swift_debug = project_root.join("swift").join(".build").join("debug").join("simulator-server");
+        if swift_debug.exists() {
+            return Some(swift_debug);
+        }
+
+        let swift_release = project_root.join("swift").join(".build").join("release").join("simulator-server");
+        if swift_release.exists() {
+            return Some(swift_release);
+        }
     }
 
     // 3. Bundled binary in app resources (for release builds)

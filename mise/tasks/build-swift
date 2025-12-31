@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Build Swift tools"
+set -e
+
+cd "$MISE_PROJECT_ROOT/swift"
+
+echo "Building simulator-server..."
+swift build
+
+echo "Done. Binary at: .build/debug/simulator-server"
