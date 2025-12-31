@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Play, FolderOpen, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Terminal } from "lucide-react"
+import { StreamViewer } from "@/components/StreamViewer"
 
 interface Simulator {
   udid: string
@@ -445,24 +446,20 @@ export function BuildAndRun() {
         </Card>
 
         {/* Right side - Simulator Stream (full height) */}
-        <div className="flex-1 flex items-center justify-center min-w-0 min-h-0 overflow-hidden bg-black/20 rounded-xl">
-          {streamUrl ? (
-            <img
-              src={streamUrl}
-              alt="Simulator stream"
-              className="h-full w-auto object-contain rounded-xl shadow-2xl"
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center gap-4 text-muted-foreground">
-              <div className="w-[200px] h-[400px] border-2 border-dashed border-border rounded-3xl flex items-center justify-center">
-                <span className="text-sm">Simulator</span>
-              </div>
-              <p className="text-sm">
-                Configure your project and click "Build & Run" to start
-              </p>
-            </div>
-          )}
-        </div>
+         <div className="flex-1 flex items-center justify-center min-w-0 min-h-0 overflow-hidden bg-black/20 rounded-xl">
+           {streamUrl ? (
+             <StreamViewer streamUrl={streamUrl} />
+           ) : (
+             <div className="flex flex-col items-center justify-center gap-4 text-muted-foreground">
+               <div className="w-[200px] h-[400px] border-2 border-dashed border-border rounded-3xl flex items-center justify-center">
+                 <span className="text-sm">Simulator</span>
+               </div>
+               <p className="text-sm">
+                 Configure your project and click "Build & Run" to start
+               </p>
+             </div>
+           )}
+         </div>
       </div>
     </div>
   )

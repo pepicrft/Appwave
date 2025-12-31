@@ -1,18 +1,20 @@
 use axum::{
     body::Body,
     extract::Query,
-    http::{header, HeaderValue, StatusCode},
+    http::{header, StatusCode},
     response::{IntoResponse, Response, sse::{Event, KeepAlive, Sse}},
     Json,
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tokio::process::Command;
+use tokio::process::{Command, Child};
 use tokio::sync::broadcast;
+use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 use std::convert::Infallible;
 use futures::stream::Stream;
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
 
 #[derive(Deserialize)]
 pub struct StreamQuery {
@@ -40,17 +42,121 @@ static STREAM_LOG_SENDER: Lazy<broadcast::Sender<StreamLogEvent>> = Lazy::new(||
     tx
 });
 
+// Global simulator session cache - one per UDID
+type SessionCache = Mutex<HashMap<String, SimulatorSession>>;
+static SESSION_CACHE: Lazy<SessionCache> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+// MARK: - SimulatorSession
+
+/// Represents a persistent connection to a simulator via simulator-server
+struct SimulatorSession {
+    udid: String,
+    process: Child,
+    stream_url: String,
+}
+
+impl SimulatorSession {
+    /// Start a new simulator-server session
+    async fn new(udid: String, fps: u32, quality: f32, log_tx: &broadcast::Sender<StreamLogEvent>) -> Result<Self, String> {
+        let simulator_server_path = find_simulator_server_binary()
+            .ok_or_else(|| "simulator-server binary not found".to_string())?;
+
+        let _ = log_tx.send(StreamLogEvent::Info {
+            message: format!("Spawning simulator-server for {}", udid),
+        });
+
+        let mut cmd = Command::new(&simulator_server_path);
+        cmd.args([
+            "--udid", &udid,
+            "--fps", &fps.to_string(),
+            "--quality", &quality.to_string(),
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .stdin(std::process::Stdio::piped());
+
+        let mut child = cmd.spawn()
+            .map_err(|e| format!("Failed to spawn simulator-server: {}", e))?;
+
+        // Read stdout to find "stream_ready <URL>"
+        let stdout = child.stdout.take()
+            .ok_or_else(|| "Failed to capture simulator-server stdout".to_string())?;
+
+        let log_tx_clone = log_tx.clone();
+        let stream_url = Self::read_stream_ready_async(stdout, &log_tx_clone)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Log stderr in background
+        if let Some(stderr) = child.stderr.take() {
+            let log_tx_stderr = log_tx.clone();
+            tokio::spawn(async move {
+                let reader = tokio::io::BufReader::new(stderr);
+                let mut lines = tokio::io::AsyncBufReadExt::lines(reader);
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if !line.is_empty() {
+                        let _ = log_tx_stderr.send(StreamLogEvent::Debug {
+                            message: format!("simulator-server stderr: {}", line),
+                        });
+                    }
+                }
+            });
+        }
+
+        let _ = log_tx.send(StreamLogEvent::Info {
+            message: format!("simulator-server ready at {}", stream_url),
+        });
+
+        Ok(SimulatorSession {
+            udid,
+            process: child,
+            stream_url,
+        })
+    }
+
+    async fn read_stream_ready_async(
+        stdout: tokio::process::ChildStdout,
+        log_tx: &broadcast::Sender<StreamLogEvent>,
+    ) -> Result<String, String> {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+
+        // Read until we find "stream_ready <URL>"
+        loop {
+            line.clear();
+            reader.read_line(&mut line)
+                .await
+                .map_err(|e| format!("Failed to read from simulator-server: {}", e))?;
+
+            if line.is_empty() {
+                return Err("simulator-server closed without sending stream_ready".to_string());
+            }
+
+            let trimmed = line.trim();
+            let _ = log_tx.send(StreamLogEvent::Debug {
+                message: format!("simulator-server: {}", trimmed),
+            });
+
+            if trimmed.starts_with("stream_ready ") {
+                let url = trimmed.strip_prefix("stream_ready ")
+                    .ok_or_else(|| "Invalid stream_ready format".to_string())?
+                    .to_string();
+                return Ok(url);
+            }
+        }
+    }
+}
+
+impl Drop for SimulatorSession {
+    fn drop(&mut self) {
+        let _ = self.process.kill();
+    }
+}
+
 pub async fn stream_simulator(Query(query): Query<StreamQuery>) -> Response {
     let log_tx = STREAM_LOG_SENDER.clone();
-
-    // Try plasma-stream first (fast IOSurface-based), fallback to axe (screenshot-based)
-    let streamer = find_plasma_stream_binary()
-        .map(|p| ("plasma-stream", p))
-        .or_else(|| find_axe_binary().map(|p| ("axe", p)));
-
-    let Some((streamer_name, streamer_path)) = streamer else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "No streaming binary found (plasma-stream or axe)").into_response();
-    };
 
     let fps = query.fps
         .or_else(|| {
@@ -58,7 +164,7 @@ pub async fn stream_simulator(Query(query): Query<StreamQuery>) -> Response {
                 .ok()
                 .and_then(|value| value.parse::<u32>().ok())
         })
-        .unwrap_or(30)
+        .unwrap_or(60)
         .min(60);
 
     let quality = query.quality
@@ -67,176 +173,84 @@ pub async fn stream_simulator(Query(query): Query<StreamQuery>) -> Response {
                 .ok()
                 .and_then(|value| value.parse::<f32>().ok())
         })
-        .unwrap_or(0.6)
+        .unwrap_or(0.7)
         .clamp(0.1, 1.0);
 
     let _ = log_tx.send(StreamLogEvent::Info {
-        message: format!("Starting {} stream for simulator {}", streamer_name, query.udid),
-    });
-    let _ = log_tx.send(StreamLogEvent::Info {
-        message: format!("Found {} at: {}", streamer_name, streamer_path.display()),
+        message: format!("Stream request for simulator {}", query.udid),
     });
     let _ = log_tx.send(StreamLogEvent::Info {
         message: format!("Using FPS: {}, Quality: {}", fps, quality),
     });
 
-    // Build command based on which streamer we're using
-    let mut cmd = Command::new(&streamer_path);
-
-    if streamer_name == "plasma-stream" {
-        // plasma-stream uses IOSurface for fast native streaming
-        cmd.args([
-            "--udid", &query.udid,
-            "--fps", &fps.to_string(),
-            "--quality", &quality.to_string(),
-        ]);
-    } else {
-        // axe uses screenshot polling (slower fallback)
-        let axe_quality = ((quality * 100.0) as u32).min(80); // Cap at 80 to avoid PNG output
-        cmd.args([
-            "stream-video",
-            "--udid", &query.udid,
-            "--format", "mjpeg",
-            "--fps", &fps.to_string(),
-            "--quality", &axe_quality.to_string(),
-        ]);
-    }
-
-    cmd.stdout(std::process::Stdio::piped())
-       .stderr(std::process::Stdio::piped());
-
-    let _ = log_tx.send(StreamLogEvent::Info {
-        message: format!("Spawning: {} with args for UDID {}", streamer_name, query.udid),
-    });
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = log_tx.send(StreamLogEvent::Error {
-                message: format!("Failed to spawn {}: {}", streamer_name, e),
+    // Get or create session
+    let cache = SESSION_CACHE.lock().await;
+    let stream_url = match cache.get(&query.udid) {
+        Some(session) => {
+            let _ = log_tx.send(StreamLogEvent::Info {
+                message: format!("Reusing cached session for {}", query.udid),
             });
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to spawn {}: {}", streamer_name, e)).into_response();
+            session.stream_url.clone()
         }
-    };
-
-    let stdout = match child.stdout.take() {
-        Some(s) => s,
         None => {
-            let _ = log_tx.send(StreamLogEvent::Error {
-                message: format!("Failed to capture {} stdout", streamer_name),
-            });
-            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to capture {} stdout", streamer_name)).into_response();
-        }
-    };
+            drop(cache); // Release lock before spawning
 
-    // Log stderr in background
-    let streamer_name_for_stderr = streamer_name.to_string();
-    if let Some(stderr) = child.stderr.take() {
-        let log_tx_stderr = log_tx.clone();
-        tokio::spawn(async move {
-            let reader = tokio::io::BufReader::new(stderr);
-            let mut lines = tokio::io::AsyncBufReadExt::lines(reader);
-            while let Ok(Some(line)) = lines.next_line().await {
-                if !line.is_empty() {
-                    let _ = log_tx_stderr.send(StreamLogEvent::Debug {
-                        message: format!("{} stderr: {}", streamer_name_for_stderr, line),
-                    });
-                }
-            }
-        });
-    }
-
-    let _ = log_tx.send(StreamLogEvent::Info {
-        message: format!("{} process spawned, proxying output...", streamer_name),
-    });
-
-    // Skip the HTTP headers from the streamer, then proxy the multipart body
-    let mut reader = tokio::io::BufReader::new(stdout);
-    let stream = async_stream::stream! {
-        use tokio::io::AsyncBufReadExt;
-
-        // Skip any intro text until we hit the HTTP response line
-        let mut found_http = false;
-        loop {
-            let mut line = String::new();
-            match reader.read_line(&mut line).await {
-                Ok(0) => break, // EOF
-                Ok(_) => {
-                    let trimmed = line.trim_end();
-                    let _ = log_tx.send(StreamLogEvent::Debug {
-                        message: format!("streamer output: {}", trimmed),
-                    });
-                    if trimmed.starts_with("HTTP/1.1") {
-                        found_http = true;
-                        // Skip the rest of the HTTP headers until empty line
-                        loop {
-                            let mut header_line = String::new();
-                            match reader.read_line(&mut header_line).await {
-                                Ok(0) => break, // EOF
-                                Ok(_) => {
-                                    let trimmed_header = header_line.trim_end();
-                                    let _ = log_tx.send(StreamLogEvent::Debug {
-                                        message: format!("streamer header: {}", trimmed_header),
-                                    });
-                                    if trimmed_header.is_empty() {
-                                        break;
-                                    }
-                                }
-                                Err(_) => break,
-                            }
-                        }
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-
-        if !found_http {
-            let _ = log_tx.send(StreamLogEvent::Error {
-                message: "Never found HTTP response from streamer".to_string(),
-            });
-            let _ = child.kill().await;
-            return;
-        }
-
-        let _ = log_tx.send(StreamLogEvent::Info {
-            message: "HTTP headers skipped, streaming multipart data...".to_string(),
-        });
-
-        // Proxy the multipart body directly
-        let mut buf = vec![0u8; 65536];
-        loop {
-            use tokio::io::AsyncReadExt;
-            match reader.read(&mut buf).await {
-                Ok(0) => {
-                    let _ = log_tx.send(StreamLogEvent::Info {
-                        message: "Stream EOF".to_string(),
-                    });
-                    break;
-                }
-                Ok(n) => {
-                    yield Ok::<_, std::convert::Infallible>(axum::body::Bytes::copy_from_slice(&buf[..n]));
+            match SimulatorSession::new(query.udid.clone(), fps, quality, &log_tx).await {
+                Ok(session) => {
+                    let stream_url = session.stream_url.clone();
+                    SESSION_CACHE.lock().await.insert(query.udid.clone(), session);
+                    stream_url
                 }
                 Err(e) => {
                     let _ = log_tx.send(StreamLogEvent::Error {
-                        message: format!("Read error: {}", e),
+                        message: format!("Failed to start session: {}", e),
                     });
-                    break;
+                    return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to start session: {}", e)).into_response();
                 }
             }
         }
+    };
 
-        let _ = child.kill().await;
+    // Proxy the stream from simulator-server through the backend
+    let _ = log_tx.send(StreamLogEvent::Info {
+        message: format!("Proxying stream from: {}", stream_url),
+    });
+
+    // Stream the MJPEG from simulator-server
+    let stream = async_stream::stream! {
+        // Use reqwest to fetch the stream from simulator-server
+        match reqwest::Client::new().get(&stream_url).send().await {
+            Ok(response) => {
+                let mut bytes_stream = response.bytes_stream();
+                while let Some(chunk_result) = futures::stream::StreamExt::next(&mut bytes_stream).await {
+                    match chunk_result {
+                        Ok(chunk) => {
+                            yield Ok::<_, Infallible>(chunk);
+                        }
+                        Err(e) => {
+                            let _ = log_tx.send(StreamLogEvent::Error {
+                                message: format!("Stream chunk error: {}", e),
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                let _ = log_tx.send(StreamLogEvent::Error {
+                    message: format!("Failed to fetch stream from simulator-server: {}", e),
+                });
+            }
+        }
     };
 
     let mut response = Response::new(Body::from_stream(stream));
     let headers = response.headers_mut();
     headers.insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_static("multipart/x-mixed-replace; boundary=--mjpegstream"),
+        "multipart/x-mixed-replace; boundary=--mjpegstream".parse().unwrap(),
     );
-    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(header::CACHE_CONTROL, "no-cache".parse().unwrap());
     response
 }
 
@@ -268,6 +282,52 @@ pub async fn stream_logs() -> Sse<impl Stream<Item = Result<Event, Infallible>>>
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+
+/// Find the simulator-server binary (persistent connection with persistent callbacks)
+fn find_simulator_server_binary() -> Option<PathBuf> {
+    // 1. Environment variable override
+    if let Ok(path) = std::env::var("SIMULATOR_SERVER") {
+        let candidate = PathBuf::from(&path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    // 2. Bundled binary in app/bin (for development)
+    let dev_bin = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| {
+            let tools_server = p.join("tools").join("simulator-server").join(".build").join("debug").join("simulator-server");
+            if tools_server.exists() {
+                return Some(tools_server);
+            }
+            
+            let tools_server_release = p.join("tools").join("simulator-server").join(".build").join("release").join("simulator-server");
+            if tools_server_release.exists() {
+                return Some(tools_server_release);
+            }
+            
+            None
+        });
+    if dev_bin.is_some() {
+        return dev_bin;
+    }
+
+    // 3. Bundled binary in app resources (for release builds)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(macos_dir) = exe_path.parent() {
+            let resources_dir = macos_dir.parent().map(|p| p.join("Resources"));
+            if let Some(resources) = resources_dir {
+                let bundled = resources.join("binaries").join("simulator-server");
+                if bundled.exists() {
+                    return Some(bundled);
+                }
+            }
+        }
+    }
+
+    None
+}
 
 /// Find the plasma-stream binary (fast IOSurface-based streaming)
 fn find_plasma_stream_binary() -> Option<PathBuf> {

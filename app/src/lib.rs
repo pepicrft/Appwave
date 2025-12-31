@@ -208,9 +208,9 @@ fn get_frontend_dir(app: &AppHandle) -> Option<String> {
 }
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let open_i = MenuItem::with_id(app, "open", "Open in Browser", true, None::<&str>)?;
+    let open_i = MenuItem::with_id(app, "open", "Open in browser", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let quit_i = MenuItem::with_id(app, "quit", "Quit Plasma", true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
     let menu = Menu::with_items(app, &[&open_i, &separator, &quit_i])?;
 
