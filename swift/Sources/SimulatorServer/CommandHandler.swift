@@ -17,9 +17,9 @@ class CommandHandler {
     }
 
     enum TouchType: String {
-        case began = "began"
-        case moved = "moved"
-        case ended = "ended"
+        case began = "Down"
+        case moved = "Move"
+        case ended = "Up"
     }
 
     enum ButtonType: String {
@@ -83,21 +83,26 @@ class CommandHandler {
             return .unknown
             
         case "touch":
+            // Format: touch <type> <x,y> [<x,y> ...]
+            // Example: touch Down 0.5,0.5
             if parts.count > 1 {
                 let args = parts[1]
-                let components = args.split(separator: ",", omittingEmptySubsequences: true).map(String.init)
-                
-                guard components.count >= 3 else { return .unknown }
-                
-                if let touchType = TouchType(rawValue: components[0]) {
+                // Split by space to get type and coordinates
+                let spaceParts = args.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+                guard spaceParts.count >= 2 else { return .unknown }
+
+                if let touchType = TouchType(rawValue: spaceParts[0]) {
                     var points: [(Double, Double)] = []
-                    for i in stride(from: 1, to: components.count - 1, by: 2) {
-                        if let x = Double(components[i]),
-                           let y = Double(components[i + 1]) {
+                    // Parse each coordinate pair (x,y)
+                    for i in 1..<spaceParts.count {
+                        let coords = spaceParts[i].split(separator: ",", omittingEmptySubsequences: true).map(String.init)
+                        if coords.count == 2,
+                           let x = Double(coords[0]),
+                           let y = Double(coords[1]) {
                             points.append((x, y))
                         }
                     }
-                    
+
                     if !points.isEmpty {
                         return .touch(touchType, points)
                     }

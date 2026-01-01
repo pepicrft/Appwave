@@ -7,14 +7,16 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tokio::process::{Command, Child};
+use tokio::process::{Command, Child, ChildStdin};
 use tokio::sync::broadcast;
 use tokio::sync::Mutex;
+use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info};
 use std::convert::Infallible;
 use futures::stream::Stream;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct StreamQuery {
@@ -54,6 +56,8 @@ struct SimulatorSession {
     udid: String,
     process: Child,
     stream_url: String,
+    #[allow(dead_code)]
+    stdin: Arc<Mutex<ChildStdin>>,
 }
 
 impl SimulatorSession {
@@ -78,6 +82,10 @@ impl SimulatorSession {
 
         let mut child = cmd.spawn()
             .map_err(|e| format!("Failed to spawn simulator-server: {}", e))?;
+
+        // Capture stdin for sending commands
+        let stdin = child.stdin.take()
+            .ok_or_else(|| "Failed to capture simulator-server stdin".to_string())?;
 
         // Read stdout to find "stream_ready <URL>"
         let stdout = child.stdout.take()
@@ -117,7 +125,18 @@ impl SimulatorSession {
             udid,
             process: child,
             stream_url,
+            stdin: Arc::new(Mutex::new(stdin)),
         })
+    }
+
+    /// Send a command to the simulator-server via stdin
+    async fn send_command(&self, command: &str) -> Result<(), String> {
+        let mut stdin = self.stdin.lock().await;
+        stdin.write_all(format!("{}\n", command).as_bytes()).await
+            .map_err(|e| format!("Failed to write command: {}", e))?;
+        stdin.flush().await
+            .map_err(|e| format!("Failed to flush command: {}", e))?;
+        Ok(())
     }
 
     async fn read_stream_ready_async(
@@ -170,6 +189,15 @@ impl SimulatorSession {
                 }
             }
         }
+    }
+}
+
+/// Send a command to a simulator session by UDID
+async fn send_session_command(udid: &str, command: &str) -> Result<(), String> {
+    let cache = SESSION_CACHE.lock().await;
+    match cache.get(udid) {
+        Some(session) => session.send_command(command).await,
+        None => Err(format!("No active session for simulator {}", udid)),
     }
 }
 
@@ -345,6 +373,357 @@ pub async fn stream_logs() -> Sse<impl Stream<Item = Result<Event, Infallible>>>
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
+// MARK: - Touch API (using AXe)
+
+#[derive(Debug, Deserialize)]
+pub struct TouchRequest {
+    pub udid: String,
+    /// Touch type: "began", "moved", or "ended"
+    #[serde(rename = "type")]
+    pub touch_type: String,
+    /// Array of touch points, each with x and y in normalized coordinates (0.0-1.0)
+    pub touches: Vec<TouchPoint>,
+    /// Screen width in pixels (for coordinate conversion)
+    pub screen_width: Option<u32>,
+    /// Screen height in pixels (for coordinate conversion)
+    pub screen_height: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TouchPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TouchResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Find the AXe binary
+fn find_axe_binary() -> Option<PathBuf> {
+    // 1. Environment variable override
+    if let Ok(path) = std::env::var("AXE_BINARY") {
+        let candidate = PathBuf::from(&path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+
+    // 2. Development: app/binaries/axe
+    if let Some(project_root) = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent() {
+        let dev_path = project_root.join("app").join("binaries").join("axe");
+        if dev_path.exists() {
+            return Some(dev_path);
+        }
+        // Also check directly in app/binaries (if CARGO_MANIFEST_DIR is app)
+        let dev_path2 = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries").join("axe");
+        if dev_path2.exists() {
+            return Some(dev_path2);
+        }
+    }
+
+    // 3. Bundled binary in app resources (for release builds)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(macos_dir) = exe_path.parent() {
+            let resources_dir = macos_dir.parent().map(|p| p.join("Resources"));
+            if let Some(resources) = resources_dir {
+                let bundled = resources.join("binaries").join("axe");
+                if bundled.exists() {
+                    return Some(bundled);
+                }
+            }
+        }
+    }
+
+    // 4. Check if axe is in PATH (Homebrew install)
+    if let Ok(output) = std::process::Command::new("which").arg("axe").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    None
+}
+
+/// Send touch events to the simulator via simulator-server stdin
+/// Uses the protocol: touch <type> <x,y> where coordinates are normalized 0.0-1.0
+pub async fn send_touch(Json(request): Json<TouchRequest>) -> impl IntoResponse {
+    // Validate we have at least one touch point
+    if request.touches.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(TouchResponse {
+                success: false,
+                error: Some("At least one touch point is required".to_string()),
+            }),
+        ).into_response();
+    }
+
+    // Map touch type to simulator-server protocol
+    let touch_type = match request.touch_type.as_str() {
+        "began" => "Down",
+        "moved" => "Move",
+        "ended" => "Up",
+        _ => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(TouchResponse {
+                    success: false,
+                    error: Some(format!("Invalid touch type: {}. Must be 'began', 'moved', or 'ended'", request.touch_type)),
+                }),
+            ).into_response();
+        }
+    };
+
+    // Build touch coordinates string (normalized 0.0-1.0)
+    let coords: Vec<String> = request.touches.iter()
+        .map(|t| format!("{:.4},{:.4}", t.x, t.y))
+        .collect();
+    let coords_str = coords.join(" ");
+
+    // Build command: touch <type> <x,y> [<x,y> ...]
+    let command = format!("touch {} {}", touch_type, coords_str);
+
+    debug!("Sending touch command: {}", command);
+
+    // Send via simulator-server stdin (fast, no process spawn)
+    match send_session_command(&request.udid, &command).await {
+        Ok(()) => {
+            Json(TouchResponse { success: true, error: None }).into_response()
+        }
+        Err(e) => {
+            error!("Touch command failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TouchResponse {
+                    success: false,
+                    error: Some(e),
+                }),
+            ).into_response()
+        }
+    }
+}
+
+// MARK: - Tap API (using AXe tap command - more efficient for single taps)
+
+#[derive(Debug, Deserialize)]
+pub struct TapRequest {
+    pub udid: String,
+    /// X coordinate (normalized 0.0-1.0)
+    pub x: f64,
+    /// Y coordinate (normalized 0.0-1.0)
+    pub y: f64,
+    /// Screen width in pixels (for coordinate conversion)
+    pub screen_width: Option<u32>,
+    /// Screen height in pixels (for coordinate conversion)
+    pub screen_height: Option<u32>,
+}
+
+/// Send a tap event using AXe's tap command (more efficient than touch down + up)
+pub async fn send_tap(Json(request): Json<TapRequest>) -> impl IntoResponse {
+    info!("=== TAP API CALLED === udid={}, x={:.3}, y={:.3}", request.udid, request.x, request.y);
+
+    // Get screen dimensions from request (these are in PIXELS from the stream)
+    let pixel_width = request.screen_width.unwrap_or(393) as f64;
+    let pixel_height = request.screen_height.unwrap_or(852) as f64;
+
+    // AXe expects POINT coordinates, not pixel coordinates
+    // iOS uses @2x or @3x scaling. We detect the scale factor based on common device sizes.
+    // Common point sizes: 390x844 (iPhone 14/15/16), 393x852 (iPhone 14/15/16 Pro), 430x932 (Pro Max)
+    // Common pixel sizes: 1170x2532 (@3x), 1179x2556 (@3x), 1290x2796 (@3x)
+    let scale_factor = if pixel_width > 1000.0 { 3.0 } else if pixel_width > 700.0 { 2.0 } else { 1.0 };
+
+    let point_width = pixel_width / scale_factor;
+    let point_height = pixel_height / scale_factor;
+
+    // Convert normalized coordinates to POINT coordinates (not pixels)
+    let x = (request.x * point_width).round() as i32;
+    let y = (request.y * point_height).round() as i32;
+
+    info!("Tap: normalized({:.3}, {:.3}) -> points({}, {}) [pixels={}x{}, scale={}x, points={}x{}]",
+          request.x, request.y, x, y, pixel_width, pixel_height, scale_factor, point_width, point_height);
+
+    // Find AXe binary
+    let axe_path = match find_axe_binary() {
+        Some(path) => path,
+        None => {
+            error!("AXe binary not found");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TouchResponse {
+                    success: false,
+                    error: Some("AXe binary not found".to_string()),
+                }),
+            ).into_response();
+        }
+    };
+
+    // Set up library path for AXe's frameworks
+    let frameworks_path = axe_path.parent()
+        .map(|p| p.join("Frameworks"))
+        .unwrap_or_default();
+
+    info!("Executing: axe tap -x {} -y {} --udid {}", x, y, request.udid);
+
+    let result = Command::new(&axe_path)
+        .args(["tap", "-x", &x.to_string(), "-y", &y.to_string(), "--udid", &request.udid])
+        .env("DYLD_FRAMEWORK_PATH", &frameworks_path)
+        .output()
+        .await;
+
+    match result {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            info!("AXe tap result: status={}, stdout='{}', stderr='{}'", output.status, stdout.trim(), stderr.trim());
+
+            if output.status.success() {
+                Json(TouchResponse { success: true, error: None }).into_response()
+            } else {
+                error!("AXe tap failed: {}", stderr);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(TouchResponse {
+                        success: false,
+                        error: Some(format!("AXe command failed: {}", stderr)),
+                    }),
+                ).into_response()
+            }
+        }
+        Err(e) => {
+            error!("Failed to execute AXe: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TouchResponse {
+                    success: false,
+                    error: Some(format!("Failed to execute AXe: {}", e)),
+                }),
+            ).into_response()
+        }
+    }
+}
+
+// MARK: - Swipe API (using AXe swipe command - single command for entire gesture)
+
+#[derive(Debug, Deserialize)]
+pub struct SwipeRequest {
+    pub udid: String,
+    /// Start X coordinate (normalized 0.0-1.0)
+    pub start_x: f64,
+    /// Start Y coordinate (normalized 0.0-1.0)
+    pub start_y: f64,
+    /// End X coordinate (normalized 0.0-1.0)
+    pub end_x: f64,
+    /// End Y coordinate (normalized 0.0-1.0)
+    pub end_y: f64,
+    /// Screen width in pixels
+    pub screen_width: Option<u32>,
+    /// Screen height in pixels
+    pub screen_height: Option<u32>,
+    /// Duration of swipe in seconds (optional)
+    pub duration: Option<f64>,
+}
+
+/// Send a swipe gesture using AXe's swipe command
+pub async fn send_swipe(Json(request): Json<SwipeRequest>) -> impl IntoResponse {
+    // Get screen dimensions from request (these are in PIXELS from the stream)
+    let pixel_width = request.screen_width.unwrap_or(393) as f64;
+    let pixel_height = request.screen_height.unwrap_or(852) as f64;
+
+    // AXe expects POINT coordinates, not pixel coordinates
+    let scale_factor = if pixel_width > 1000.0 { 3.0 } else if pixel_width > 700.0 { 2.0 } else { 1.0 };
+
+    let point_width = pixel_width / scale_factor;
+    let point_height = pixel_height / scale_factor;
+
+    // Convert normalized coordinates to POINT coordinates
+    let start_x = (request.start_x * point_width).round() as i32;
+    let start_y = (request.start_y * point_height).round() as i32;
+    let end_x = (request.end_x * point_width).round() as i32;
+    let end_y = (request.end_y * point_height).round() as i32;
+
+    info!("Swipe: ({:.2},{:.2})->({:.2},{:.2}) => points ({},{})->({},{}) [scale={}x]",
+          request.start_x, request.start_y, request.end_x, request.end_y,
+          start_x, start_y, end_x, end_y, scale_factor);
+
+    // Find AXe binary
+    let axe_path = match find_axe_binary() {
+        Some(path) => path,
+        None => {
+            error!("AXe binary not found");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TouchResponse {
+                    success: false,
+                    error: Some("AXe binary not found".to_string()),
+                }),
+            ).into_response();
+        }
+    };
+
+    // Set up library path for AXe's frameworks
+    let frameworks_path = axe_path.parent()
+        .map(|p| p.join("Frameworks"))
+        .unwrap_or_default();
+
+    // Build swipe command
+    let duration = request.duration.unwrap_or(0.3);
+    let args = vec![
+        "swipe".to_string(),
+        "--start-x".to_string(), start_x.to_string(),
+        "--start-y".to_string(), start_y.to_string(),
+        "--end-x".to_string(), end_x.to_string(),
+        "--end-y".to_string(), end_y.to_string(),
+        "--duration".to_string(), duration.to_string(),
+        "--udid".to_string(), request.udid.clone(),
+    ];
+
+    info!("Executing: axe {}", args.join(" "));
+
+    let result = Command::new(&axe_path)
+        .args(&args)
+        .env("DYLD_FRAMEWORK_PATH", &frameworks_path)
+        .output()
+        .await;
+
+    match result {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            info!("AXe swipe result: status={}, stdout='{}', stderr='{}'",
+                  output.status, stdout.trim(), stderr.trim());
+
+            if output.status.success() {
+                Json(TouchResponse { success: true, error: None }).into_response()
+            } else {
+                error!("AXe swipe failed: {}", stderr);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(TouchResponse {
+                        success: false,
+                        error: Some(format!("AXe command failed: {}", stderr)),
+                    }),
+                ).into_response()
+            }
+        }
+        Err(e) => {
+            error!("Failed to execute AXe: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TouchResponse {
+                    success: false,
+                    error: Some(format!("Failed to execute AXe: {}", e)),
+                }),
+            ).into_response()
+        }
+    }
+}
 
 /// Find the simulator-server binary (persistent connection with persistent callbacks)
 fn find_simulator_server_binary() -> Option<PathBuf> {

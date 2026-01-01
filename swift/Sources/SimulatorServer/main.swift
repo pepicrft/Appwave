@@ -87,6 +87,17 @@ func main() {
     Logger.info("HTTP server started on port \(boundPort)")
     Logger.info("Stream URL: \(streamURL)")
 
+    // Initialize touch handler
+    Logger.info("Initializing touch handler...")
+    var touchHandler: TouchHandler?
+    let th = TouchHandler(udid: udid)
+    if th.start() {
+        touchHandler = th
+        Logger.info("Touch handler started successfully")
+    } else {
+        Logger.warn("Touch handler failed to start - touch events will not work")
+    }
+
     // Initialize command handler
     Logger.info("Initializing command handler...")
     let commandHandler = CommandHandler()
@@ -109,6 +120,7 @@ func main() {
             Logger.info("Command received: rotate \(rotation)")
         case .touch(let type, let points):
             Logger.debug("Command received: touch \(type.rawValue) at \(points)")
+            touchHandler?.sendTouch(type: type, points: points)
         case .button(let button, let direction):
             Logger.info("Command received: \(button.rawValue) button \(direction.rawValue)")
         case .key(let code, let direction):
