@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="Run the Tauri app in development mode"
+#MISE description="Run the Electron app in development mode"
 set -e
 
-cd app && cargo tauri dev
+cd app && npm run dev

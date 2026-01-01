@@ -1,16 +1,13 @@
-# Rust
-/target/
-**/*.rs.bk
-Cargo.lock
+# Node.js
+node_modules/
 
-# Tauri
-/app/target/
-/app/gen/
-/app/binaries/
+# Electron build output
+app/dist/
+app/release/
 
 # Frontend
-node_modules/
 /frontend/dist/
+app/frontend/dist/
 
 # Database
 *.db
@@ -45,6 +42,8 @@ DerivedData/
 
 # Frameworks (vendored binaries)
 app/Frameworks/
+app/binaries/
+app/build/
 
 # Vendored binaries (keep scripts, ignore compiled binaries)
 app/bin/fbsimctl

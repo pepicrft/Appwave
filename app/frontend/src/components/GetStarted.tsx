@@ -46,7 +46,8 @@ function getApiBaseUrl(): string {
   if (base) {
     return base.replace(/\/$/, "")
   }
-  if (typeof window !== "undefined" && "__TAURI__" in window) {
+  // In Electron, we always use localhost:4000
+  if (typeof window !== "undefined" && "electron" in window) {
     return "http://localhost:4000"
   }
   return ""

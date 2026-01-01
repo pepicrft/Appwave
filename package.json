@@ -1,0 +1,20 @@
+{
+  "name": "plasma-monorepo",
+  "private": true,
+  "packageManager": "pnpm@10.27.0",
+  "scripts": {
+    "dev": "pnpm --filter @plasma/app dev",
+    "build": "pnpm --filter @plasma/app build",
+    "package": "pnpm --filter @plasma/app package",
+    "typecheck": "pnpm --filter @plasma/app typecheck && pnpm --filter @plasma/frontend typecheck",
+    "lint": "pnpm --filter @plasma/frontend lint",
+    "test": "pnpm --filter @plasma/frontend test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "electron",
+      "esbuild"
+    ]
+  }
+}

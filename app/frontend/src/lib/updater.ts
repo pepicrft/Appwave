@@ -1,35 +1,12 @@
-import { check } from '@tauri-apps/plugin-updater';
-import { ask } from '@tauri-apps/plugin-dialog';
-import { relaunch } from '@tauri-apps/plugin-process';
+// Electron auto-updater will be handled in the main process
+// This is a stub for future implementation
 
 export async function checkForUpdates() {
-  try {
-    const update = await check();
-
-    if (update) {
-      console.log(`Update available: ${update.version}`);
-
-      const yes = await ask(
-        `Update to ${update.version} is available!\n\nRelease notes: ${update.body}`,
-        {
-          title: 'Update Available',
-          kind: 'info',
-          okLabel: 'Update',
-          cancelLabel: 'Later'
-        }
-      );
-
-      if (yes) {
-        console.log('Downloading and installing update...');
-        await update.downloadAndInstall();
-
-        // Relaunch the app to apply the update
-        await relaunch();
-      }
-    } else {
-      console.log('No updates available');
-    }
-  } catch (error) {
-    console.error('Update check failed:', error);
+  // In Electron, auto-updates are typically handled in the main process
+  // using electron-updater. For now, we just log that we're in Electron.
+  if (typeof window !== 'undefined' && 'electron' in window) {
+    console.log('Running in Electron - auto-updates will be handled by electron-updater');
+  } else {
+    console.log('Not running in Electron - skipping update check');
   }
 }

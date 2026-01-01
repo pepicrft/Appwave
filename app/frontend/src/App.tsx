@@ -3,10 +3,10 @@ import { BuildAndRun } from "@/components/BuildAndRun"
 import { checkForUpdates } from "@/lib/updater"
 
 function App() {
-  // Check for updates on app startup (only in Tauri environment)
+  // Check for updates on app startup (only in Electron environment)
   useEffect(() => {
-    // Only run updater in Tauri environment, not in tests or browser
-    if (typeof window !== 'undefined' && '__TAURI__' in window) {
+    // Only run updater in Electron environment, not in tests or browser
+    if (typeof window !== 'undefined' && 'electron' in window) {
       checkForUpdates()
     }
   }, [])

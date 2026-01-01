@@ -6,9 +6,6 @@ on:
       - main
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   check-releasable:
     name: Check for releasable changes
@@ -100,40 +97,25 @@ jobs:
         with:
           cache: true
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-
-      - name: Build frontend
+      - name: Install dependencies
         run: |
           pnpm --dir app/frontend install
-          pnpm --dir app/frontend build
+          cd app && npm install
 
-      - name: Build Tauri app
-        run: cargo tauri build
-        working-directory: app
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      - name: Rename artifacts and generate checksums
+      - name: Build Electron app
         run: |
-          cd target/release/bundle
+          cd app
+          npm run package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
-          # Rename DMG files to remove version (e.g., Plasma_0.1.0_*.dmg -> Plasma_*.dmg)
-          for file in dmg/*.dmg; do
-            if [ -f "$file" ]; then
-              newname=$(echo "$file" | sed -E 's/_[0-9]+\.[0-9]+\.[0-9]+_/_/')
-              if [ "$file" != "$newname" ]; then
-                mv "$file" "$newname"
-                echo "Renamed: $file -> $newname"
-              fi
-            fi
-          done
+      - name: Generate checksums
+        run: |
+          cd app/release
 
           # Generate consolidated checksums
           rm -f sha256.txt sha512.txt
-          find . -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \) | while read -r file; do
+          find . -type f \( -name "*.dmg" -o -name "*.zip" \) | while read -r file; do
             filename=$(basename "$file")
             shasum -a 256 "$file" | awk -v fname="$filename" '{print $1 "  " fname}' >> sha256.txt
             shasum -a 512 "$file" | awk -v fname="$filename" '{print $1 "  " fname}' >> sha512.txt
@@ -150,181 +132,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: macos-artifacts
-          path: target/release/bundle/
-
-  build-linux:
-    name: Build Linux
-    needs: check-releasable
-    if: needs.check-releasable.outputs.has_changes == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: jdx/mise-action@v2
-        with:
-          cache: true
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Build frontend
-        run: |
-          pnpm --dir app/frontend install
-          pnpm --dir app/frontend build
-
-      - name: Build Tauri app
-        run: cargo tauri build
-        working-directory: app
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      - name: Rename artifacts and generate checksums
-        run: |
-          cd target/release/bundle
-
-          # Rename DEB files to remove version
-          for file in deb/*.deb; do
-            if [ -f "$file" ]; then
-              newname=$(echo "$file" | sed -E 's/_[0-9]+\.[0-9]+\.[0-9]+_/_/')
-              if [ "$file" != "$newname" ]; then
-                mv "$file" "$newname"
-                echo "Renamed: $file -> $newname"
-              fi
-            fi
-          done
-
-          # Rename RPM files to remove version (format: name-version-release.arch.rpm -> name.arch.rpm)
-          for file in rpm/*.rpm; do
-            if [ -f "$file" ]; then
-              newname=$(echo "$file" | sed -E 's/-[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\././')
-              if [ "$file" != "$newname" ]; then
-                mv "$file" "$newname"
-                echo "Renamed: $file -> $newname"
-              fi
-            fi
-          done
-
-          # Rename AppImage files to remove version
-          for file in appimage/*.AppImage; do
-            if [ -f "$file" ]; then
-              newname=$(echo "$file" | sed -E 's/_[0-9]+\.[0-9]+\.[0-9]+_/_/')
-              if [ "$file" != "$newname" ]; then
-                mv "$file" "$newname"
-                echo "Renamed: $file -> $newname"
-              fi
-            fi
-          done
-
-          # Generate consolidated checksums
-          rm -f sha256.txt sha512.txt
-          find . -type f \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \) | while read -r file; do
-            filename=$(basename "$file")
-            sha256sum "$file" | awk -v fname="$filename" '{print $1 "  " fname}' >> sha256.txt
-            sha512sum "$file" | awk -v fname="$filename" '{print $1 "  " fname}' >> sha512.txt
-            echo "Generated checksums for: $filename"
-          done
-
-          if [ -f sha256.txt ]; then
-            echo "=== sha256.txt ==="
-            cat sha256.txt
-            echo "=== sha512.txt ==="
-            cat sha512.txt
-          fi
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-artifacts
-          path: target/release/bundle/
-
-  build-windows:
-    name: Build Windows
-    needs: check-releasable
-    if: needs.check-releasable.outputs.has_changes == 'true'
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: jdx/mise-action@v2
-        with:
-          cache: true
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-
-      - name: Build frontend
-        run: |
-          pnpm --dir app/frontend install
-          pnpm --dir app/frontend build
-
-      - name: Build Tauri app
-        run: cargo tauri build
-        working-directory: app
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      - name: Rename artifacts and generate checksums
-        shell: pwsh
-        run: |
-          cd target\release\bundle
-
-          # Rename MSI files to remove version
-          Get-ChildItem -Path msi -Filter *.msi | ForEach-Object {
-            $newName = $_.Name -replace '_[0-9]+\.[0-9]+\.[0-9]+_', '_'
-            if ($_.Name -ne $newName) {
-              $newPath = Join-Path $_.Directory $newName
-              Move-Item $_.FullName $newPath
-              Write-Host "Renamed: $($_.Name) -> $newName"
-            }
-          }
-
-          # Rename NSIS exe files to remove version
-          Get-ChildItem -Path nsis -Filter *.exe | ForEach-Object {
-            $newName = $_.Name -replace '_[0-9]+\.[0-9]+\.[0-9]+_', '_'
-            if ($_.Name -ne $newName) {
-              $newPath = Join-Path $_.Directory $newName
-              Move-Item $_.FullName $newPath
-              Write-Host "Renamed: $($_.Name) -> $newName"
-            }
-          }
-
-          # Generate consolidated checksums
-          Remove-Item -Path sha256.txt -ErrorAction SilentlyContinue
-          Remove-Item -Path sha512.txt -ErrorAction SilentlyContinue
-
-          Get-ChildItem -Recurse -Include *.msi,*.exe | ForEach-Object {
-            $file = $_.FullName
-            $filename = $_.Name
-            $hash256 = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
-            $hash512 = (Get-FileHash -Algorithm SHA512 $file).Hash.ToLower()
-            "$hash256  $filename" | Out-File -FilePath sha256.txt -Append -Encoding ASCII
-            "$hash512  $filename" | Out-File -FilePath sha512.txt -Append -Encoding ASCII
-            Write-Host "Generated checksums for: $filename"
-          }
-
-          if (Test-Path sha256.txt) {
-            Write-Host "=== sha256.txt ==="
-            Get-Content sha256.txt
-            Write-Host "=== sha512.txt ==="
-            Get-Content sha512.txt
-          }
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-artifacts
-          path: target/release/bundle/
+          path: app/release/
 
   release:
     name: Create GitHub Release
-    needs: [check-releasable, build-macos, build-linux, build-windows]
+    needs: [check-releasable, build-macos]
     if: needs.check-releasable.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -360,11 +172,7 @@ jobs:
           # Copy distributable packages
           find all-artifacts -type f \( \
             -name "*.dmg" -o \
-            -name "*.deb" -o \
-            -name "*.rpm" -o \
-            -name "*.AppImage" -o \
-            -name "*.msi" -o \
-            -name "*.exe" \
+            -name "*.zip" \
           \) -exec cp {} release-files/ \;
 
           # Consolidate checksums from all platforms

@@ -1,8 +1,6 @@
 [tools]
-rust = "latest"
 node = "22"
 pnpm = "latest"
-"cargo:tauri-cli" = "latest"
 "cargo:git-cliff" = "latest"
 
 [tools."github:cameroncooke/AXe"]

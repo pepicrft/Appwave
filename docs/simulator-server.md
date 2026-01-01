@@ -1,24 +1,24 @@
 # Simulator Server
 
 ## Overview
-Simulator streaming now uses a persistent `simulator-server` process instead of spawning a new process per request. This keeps IOSurface callbacks alive, stabilizes frame delivery, and allows multiple clients to connect without freezing.
+Simulator streaming uses a persistent `simulator-server` process instead of spawning a new process per request. This keeps IOSurface callbacks alive, stabilizes frame delivery, and allows multiple clients to connect without freezing.
 
 ## Architecture
 
 ### Old (freezing)
 ```
-HTTP request → spawn plasma-stream → stream → exit
+HTTP request -> spawn plasma-stream -> stream -> exit
 ```
 
 ### New (stable)
 ```
-HTTP request → get/create cached session → proxy stream from simulator-server
+HTTP request -> get/create cached session -> proxy stream from simulator-server
 ```
 
 ## Components
 
 ### simulator-server (Swift)
-**Location**: `tools/simulator-server/`  
+**Location**: `tools/simulator-server/`
 **Binary**: `app/bin/simulator-server`
 
 - Maintains a persistent simulator connection
@@ -39,8 +39,8 @@ stdout: stream_ready http://127.0.0.1:<port>/stream.mjpeg
         fps_report {json}
 ```
 
-### Rust Backend (Axum)
-**Location**: `app/src/simulator/mod.rs`
+### Node.js Backend (Express)
+**Location**: `app/src/main/services/simulator.ts`
 
 - Caches a session per simulator UDID
 - Spawns `simulator-server` once, reuses it for later requests
@@ -48,7 +48,7 @@ stdout: stream_ready http://127.0.0.1:<port>/stream.mjpeg
 - Exposes logs via `/api/simulator/stream/logs` (SSE)
 
 ### Frontend (React)
-**Location**: `frontend/src/components/BuildAndRun.tsx`
+**Location**: `app/frontend/src/components/BuildAndRun.tsx`
 
 - Starts streaming with `/api/simulator/stream?udid=...&fps=60&quality=0.7`
 - Displays stream in the right-hand panel
@@ -70,7 +70,7 @@ swift build -c release
 Backend:
 ```bash
 cd app
-cargo build --release
+npm run build
 ```
 
 ## Debugging

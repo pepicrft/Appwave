@@ -1,0 +1,38 @@
+{
+  "name": "@plasma/app",
+  "version": "0.1.0",
+  "description": "AI-powered app development",
+  "main": "dist/main/index.js",
+  "author": {
+    "name": "Pedro Piñera Buendía",
+    "email": "pedro@ppinera.es"
+  },
+  "scripts": {
+    "dev": "NODE_ENV=development concurrently -k \"pnpm dev:frontend\" \"pnpm dev:electron\"",
+    "dev:frontend": "pnpm --filter @plasma/frontend dev",
+    "dev:electron": "pnpm build:main && pnpm build:preload && NODE_ENV=development electron .",
+    "dev:watch": "NODE_ENV=development concurrently -k \"pnpm dev:frontend\" \"tsc -p tsconfig.main.json -w\" \"tsc -p tsconfig.preload.json -w\" \"sleep 2 && NODE_ENV=development electron .\"",
+    "build": "pnpm build:main && pnpm build:preload && pnpm --filter @plasma/frontend build",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:preload": "tsc -p tsconfig.preload.json",
+    "start": "electron .",
+    "package": "pnpm build && electron-builder --config electron-builder.json",
+    "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.preload.json"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "better-sqlite3": "^11.7.0",
+    "execa": "^9.5.2",
+    "hono": "^4.6.16",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "concurrently": "^9.1.2",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

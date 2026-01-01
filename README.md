@@ -1,8 +1,7 @@
 # Plasma
 
 [![License: MPL-2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Rust](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org/)
-[![Tauri](https://img.shields.io/badge/Tauri-2.0-blue.svg)](https://tauri.app/)
+[![Electron](https://img.shields.io/badge/Electron-34-blue.svg)](https://www.electronjs.org/)
 
 A local-first, AI-powered tool for building iOS and Android apps.
 
@@ -20,22 +19,22 @@ Install dependencies with [mise](https://mise.jdx.dev/):
 mise install
 ```
 
-Run the desktop app with GUI and tray icon:
+Run the desktop app:
 
 ```bash
 mise run dev
 ```
 
-Or run in headless mode (server only, no GUI):
+Build the app:
 
 ```bash
-mise run dev --headless
+cd app && npm run build
 ```
 
-Build the frontend:
+Package the app:
 
 ```bash
-mise run build
+cd app && npm run package
 ```
 
 ## License
