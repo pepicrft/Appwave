@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import { detectProject } from './projects';
+import { registerProcess } from './process-manager';
 
 export type XcodeProjectType = 'project' | 'workspace';
 
@@ -53,6 +54,7 @@ export async function discoverProject(projectPath: string): Promise<XcodeProject
 
   return new Promise((resolve, reject) => {
     const proc = spawn('xcodebuild', args);
+    registerProcess(proc);
     let stdout = '';
     let stderr = '';
 
@@ -163,6 +165,7 @@ async function getBuildSettings(
 
   return new Promise((resolve, reject) => {
     const proc = spawn('xcodebuild', args);
+    registerProcess(proc);
     let stdout = '';
 
     proc.stdout.on('data', (data) => {
@@ -233,6 +236,7 @@ export function buildSchemeStream(
       ];
 
       const proc = spawn('xcodebuild', args);
+      registerProcess(proc);
 
       proc.stdout.on('data', (data) => {
         const lines = data.toString().split('\n');

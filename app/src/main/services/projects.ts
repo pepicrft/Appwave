@@ -1,12 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
-
-export type ProjectType = 'xcode' | 'android';
+import type { Platform, ProjectType } from '../../shared/ipc-types';
 
 export interface Project {
   path: string;
   name: string;
   type: ProjectType;
+  platforms: Platform[];
   valid: boolean;
 }
 
@@ -36,6 +36,7 @@ function detectFromProjectPath(projectPath: string): Project | null {
       type: 'xcode',
       name,
       path: projectPath,
+      platforms: ['ios'],
       valid: fs.existsSync(projectPath),
     };
   }
@@ -47,6 +48,7 @@ function detectFromProjectPath(projectPath: string): Project | null {
       type: 'xcode',
       name,
       path: projectPath,
+      platforms: ['ios'],
       valid: fs.existsSync(projectPath),
     };
   }
@@ -59,6 +61,7 @@ function detectFromProjectPath(projectPath: string): Project | null {
       type: 'android',
       name,
       path: projectPath,
+      platforms: ['android'],
       valid: fs.existsSync(projectPath),
     };
   }
@@ -86,6 +89,7 @@ function detectFromDirectory(dirPath: string): Project | null {
         type: 'xcode',
         name,
         path: projectPath,
+        platforms: ['ios'],
         valid: fs.existsSync(projectPath),
       };
     }
@@ -100,6 +104,7 @@ function detectFromDirectory(dirPath: string): Project | null {
         type: 'xcode',
         name,
         path: projectPath,
+        platforms: ['ios'],
         valid: fs.existsSync(projectPath),
       };
     }
@@ -111,6 +116,7 @@ function detectFromDirectory(dirPath: string): Project | null {
         type: 'android',
         name,
         path: projectPath,
+        platforms: ['android'],
         valid: fs.existsSync(projectPath),
       };
     }

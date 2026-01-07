@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react"
+import { useParams, useNavigate } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Play, FolderOpen, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Terminal } from "lucide-react"
+import { Play, FolderOpen, Loader2, CheckCircle, XCircle, ChevronDown, ChevronUp, Terminal, ArrowLeft } from "lucide-react"
 import { StreamViewer } from "@/components/StreamViewer"
 import { ProjectSelector } from "@/components/ProjectSelector"
 import { api, type BuildEvent, type BuildProduct, type Simulator, type StreamLogEvent, type ProjectRecord } from "@/lib/api"
@@ -16,8 +16,12 @@ type BuildState =
   | { status: "error"; message: string }
   | { status: "success"; products: BuildProduct[] }
 
-export function BuildAndRun() {
-  const [projectPath, setProjectPath] = useState<string | null>(null)
+export function ProjectEditor() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+
+  const [project, setProject] = useState<ProjectRecord | null>(null)
+  const [isLoadingProject, setIsLoadingProject] = useState(true)
   const [simulators, setSimulators] = useState<Simulator[]>([])
   const [selectedSimulator, setSelectedSimulator] = useState("")
   const [schemes, setSchemes] = useState<string[]>([])
@@ -25,6 +29,27 @@ export function BuildAndRun() {
   const [buildState, setBuildState] = useState<BuildState>({ status: "idle" })
   const [streamLogs, setStreamLogs] = useState<string[]>([])
   const [showLogs, setShowLogs] = useState(true)
+
+  // Load project by ID
+  useEffect(() => {
+    if (!id) return
+
+    setIsLoadingProject(true)
+    api.projects.getRecent({ limit: 100 })
+      .then((projects) => {
+        const found = projects.find(p => p.id === parseInt(id))
+        if (found) {
+          setProject(found)
+        } else {
+          navigate("/open")
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load project:", err)
+        navigate("/open")
+      })
+      .finally(() => setIsLoadingProject(false))
+  }, [id, navigate])
 
   // Discover schemes for a given path
   const discoverSchemes = useCallback(async (path: string) => {
@@ -41,12 +66,18 @@ export function BuildAndRun() {
     }
   }, [])
 
+  // Load schemes when project loads
+  useEffect(() => {
+    if (project?.path) {
+      discoverSchemes(project.path)
+    }
+  }, [project?.path, discoverSchemes])
+
   // Fetch simulators on mount
   useEffect(() => {
     api.simulator.list()
       .then((simulatorList) => {
         setSimulators(simulatorList)
-        // Auto-select first booted simulator, or first available
         const booted = simulatorList.find((s) => s.state === "Booted")
         if (booted) {
           setSelectedSimulator(booted.udid)
@@ -63,7 +94,7 @@ export function BuildAndRun() {
       return
     }
 
-    setStreamLogs([]) // Clear previous logs
+    setStreamLogs([])
 
     const formatLogEvent = (event: StreamLogEvent): string => {
       const timestamp = new Date().toLocaleTimeString()
@@ -90,22 +121,11 @@ export function BuildAndRun() {
     }
   }, [buildState.status])
 
-  const handlePathChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const path = e.target.value
-    setProjectPath(path)
-  }
-
-  const handlePathBlur = () => {
-    if (projectPath) {
-      discoverSchemes(projectPath)
-    }
-  }
-
   const handleBuildAndRun = async () => {
-    if (!projectPath || !selectedScheme || !selectedSimulator) {
+    if (!project?.path || !selectedScheme || !selectedSimulator) {
       setBuildState({
         status: "error",
-        message: "Please select a project, scheme, and simulator",
+        message: "Please select a scheme and simulator",
       })
       return
     }
@@ -115,11 +135,8 @@ export function BuildAndRun() {
     try {
       const lines: string[] = []
 
-      // Wait for build to complete using a promise
       const buildResult = await new Promise<{ success: boolean; products: BuildProduct[]; buildDir?: string; error?: string }>((resolve) => {
-        // Subscribe to build events
         const unsubscribeBuild = api.xcode.onBuildEvent((event: BuildEvent) => {
-          // Log to Chromium DevTools console
           if (event.type === "output" && event.line) {
             console.log("[BUILD]", event.line)
             lines.push(event.line)
@@ -128,9 +145,6 @@ export function BuildAndRun() {
             console.log("[BUILD] Started:", event.scheme)
           } else if (event.type === "completed") {
             console.log("[BUILD] Completed:", event.success ? "SUCCESS" : "FAILED")
-            if (event.products?.length) {
-              console.log("[BUILD] Products:", event.products.map(p => p.name).join(", "))
-            }
             unsubscribeBuild()
             resolve({
               success: event.success ?? false,
@@ -148,14 +162,12 @@ export function BuildAndRun() {
           }
         })
 
-        // Start the build
         api.xcode.startBuild({
-          path: projectPath,
+          path: project.path,
           scheme: selectedScheme,
         })
       })
 
-      // Handle build failure
       if (!buildResult.success) {
         setBuildState({
           status: "error",
@@ -166,9 +178,7 @@ export function BuildAndRun() {
 
       let buildProducts = buildResult.products
 
-      // Check if we got build products
       if (buildProducts.length === 0 && buildResult.buildDir) {
-        // Try to get launchable products from the build directory
         buildProducts = await api.xcode.getLaunchableProducts({ buildDir: buildResult.buildDir })
       }
 
@@ -180,7 +190,6 @@ export function BuildAndRun() {
         return
       }
 
-      // Install and launch
       setBuildState({ status: "installing" })
 
       await api.simulator.launch({
@@ -188,7 +197,6 @@ export function BuildAndRun() {
         appPath: buildProducts[0].path,
       })
 
-      // Start streaming
       await api.simulator.startStream({
         udid: selectedSimulator,
         fps: 60,
@@ -236,17 +244,35 @@ export function BuildAndRun() {
     }
   }
 
-  const isLoading =
-    buildState.status === "building" || buildState.status === "installing"
+  const isLoading = buildState.status === "building" || buildState.status === "installing"
+
+  if (isLoadingProject) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-background text-foreground">
+        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (!project) {
+    return null
+  }
 
   return (
     <div className="h-screen w-screen flex flex-col bg-background text-foreground overflow-hidden">
-      {/* Title Bar - macOS style draggable region */}
+      {/* Title Bar */}
       <header
-        className="h-12 shrink-0 flex items-center pl-20 pr-4 border-b border-border"
+        className="h-12 shrink-0 flex items-center justify-between pl-20 pr-4 border-b border-border"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate("/open")}
+            className="p-1 rounded hover:bg-secondary/50 transition-colors"
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+          >
+            <ArrowLeft className="w-4 h-4 text-muted-foreground" />
+          </button>
           <img
             src="/plasma-icon.png"
             alt="Plasma"
@@ -254,10 +280,9 @@ export function BuildAndRun() {
           />
           <span className="text-sm text-muted-foreground">/</span>
           <ProjectSelector
-            selectedPath={projectPath}
-            onSelectProject={(project: ProjectRecord) => {
-              setProjectPath(project.path)
-              discoverSchemes(project.path)
+            selectedPath={project.path}
+            onSelectProject={(newProject: ProjectRecord) => {
+              navigate(`/project/${newProject.id}`)
             }}
           />
         </div>
@@ -270,22 +295,14 @@ export function BuildAndRun() {
           <CardHeader className="shrink-0">
             <CardTitle className="flex items-center gap-2">
               <FolderOpen className="w-5 h-5" />
-              Project Configuration
+              Build Configuration
             </CardTitle>
           </CardHeader>
           <CardContent className="flex-1 flex flex-col gap-4 overflow-y-auto">
-            {/* Project Path */}
-            <div className="flex flex-col gap-2">
-              <label className="text-sm text-muted-foreground">
-                Project Path
-              </label>
-              <Input
-                type="text"
-                placeholder="/path/to/your/project"
-                value={projectPath || ""}
-                onChange={handlePathChange}
-                onBlur={handlePathBlur}
-              />
+            {/* Project Info */}
+            <div className="flex flex-col gap-1 p-3 bg-secondary/30 rounded-md">
+              <span className="text-sm font-medium">{project.name}</span>
+              <span className="text-xs text-muted-foreground truncate">{project.path}</span>
             </div>
 
             {/* Scheme Selector */}
@@ -334,7 +351,7 @@ export function BuildAndRun() {
             <Button
               className="w-full mt-2"
               onClick={handleBuildAndRun}
-              disabled={isLoading || !projectPath || !selectedScheme}
+              disabled={isLoading || !selectedScheme}
             >
               {getStatusIcon()}
               <span className="ml-2">{getStatusText()}</span>
@@ -407,21 +424,21 @@ export function BuildAndRun() {
           </CardContent>
         </Card>
 
-        {/* Right side - Simulator Stream (full height) */}
-         <div className="flex-1 flex items-center justify-center min-w-0 min-h-0 overflow-hidden bg-black/20 rounded-xl">
-           {buildState.status === "streaming" ? (
-             <StreamViewer udid={(buildState as { udid: string }).udid} />
-           ) : (
-             <div className="flex flex-col items-center justify-center gap-4 text-muted-foreground">
-               <div className="w-[200px] h-[400px] border-2 border-dashed border-border rounded-3xl flex items-center justify-center">
-                 <span className="text-sm">Simulator</span>
-               </div>
-               <p className="text-sm">
-                 Configure your project and click "Build & Run" to start
-               </p>
-             </div>
-           )}
-         </div>
+        {/* Right side - Simulator Stream */}
+        <div className="flex-1 flex items-center justify-center min-w-0 min-h-0 overflow-hidden bg-black/20 rounded-xl">
+          {buildState.status === "streaming" ? (
+            <StreamViewer udid={(buildState as { udid: string }).udid} />
+          ) : (
+            <div className="flex flex-col items-center justify-center gap-4 text-muted-foreground">
+              <div className="w-[200px] h-[400px] border-2 border-dashed border-border rounded-3xl flex items-center justify-center">
+                <span className="text-sm">Simulator</span>
+              </div>
+              <p className="text-sm">
+                Select a scheme and click "Build & Run" to start
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

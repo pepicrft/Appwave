@@ -1,16 +1,29 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, nativeImage } from 'electron';
 import * as path from 'path';
 import { startServer } from './server';
+import { killAllProcesses } from './services/process-manager';
 
 let mainWindow: BrowserWindow | null = null;
-let serverPort: number | null = null;
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
 async function createWindow() {
-  // Start the backend server
-  serverPort = await startServer();
-  console.log(`Backend server started on port ${serverPort}`);
+  // Set dock icon in development mode on macOS
+  if (isDev && process.platform === 'darwin') {
+    // __dirname is dist/main/, so we need to go up 2 levels to app/ then into build/
+    const iconPath = path.join(__dirname, '../../build/icon-dev.png');
+    console.log('Setting dock icon from:', iconPath);
+    const icon = nativeImage.createFromPath(iconPath);
+    console.log('Icon isEmpty:', icon.isEmpty());
+    if (!icon.isEmpty()) {
+      app.dock.setIcon(icon);
+      console.log('Dock icon set successfully');
+    }
+  }
+
+  // Start HTTP server (used by both Electron and browser modes)
+  await startServer();
+  console.log('HTTP server started');
 
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -26,15 +39,15 @@ async function createWindow() {
     },
   });
 
-  // In development, load from Vite dev server
-  // In production, load from the Express server serving static files
   if (isDev) {
+    // In development, load from Vite dev server
     // Wait a bit for Vite to start
     await new Promise((resolve) => setTimeout(resolve, 1000));
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadURL(`http://localhost:${serverPort}`);
+    // In production, load from bundled frontend files
+    mainWindow.loadFile(path.join(__dirname, '../../frontend/dist/index.html'));
   }
 
   mainWindow.on('closed', () => {
@@ -59,11 +72,11 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
-  // Cleanup will happen when the process exits
   console.log('Application quitting...');
+  killAllProcesses();
 });
 
-// IPC handlers
+// Core IPC handlers (app control)
 ipcMain.handle('get-version', () => {
   return app.getVersion();
 });

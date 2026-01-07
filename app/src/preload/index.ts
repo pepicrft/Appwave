@@ -1,11 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
-// Expose protected methods to the renderer process
+// Expose only essential Electron-specific methods to the renderer process
+// All API calls go through HTTP to localhost:3001
 contextBridge.exposeInMainWorld('electron', {
   // App info
   getVersion: () => ipcRenderer.invoke('get-version'),
 
-  // Dialog methods
+  // Dialog methods (requires native dialog)
   showOpenDialog: (options: Electron.OpenDialogOptions) =>
     ipcRenderer.invoke('show-open-dialog', options),
 
@@ -21,7 +22,7 @@ contextBridge.exposeInMainWorld('electron', {
 // Type declaration for the exposed API
 declare global {
   interface Window {
-    electron: {
+    electron?: {
       getVersion: () => Promise<string>;
       showOpenDialog: (options: Electron.OpenDialogOptions) => Promise<Electron.OpenDialogReturnValue>;
       quit: () => void;

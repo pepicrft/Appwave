@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback, type MouseEvent } from "react";
 import { Loader2 } from "lucide-react";
+import { api } from "@/lib/api";
 
 interface StreamViewerProps {
-  streamUrl: string;
   udid: string;
 }
 
@@ -11,41 +11,32 @@ interface TouchPoint {
   y: number;
 }
 
-const NO_IMAGE_DATA =
-  "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><rect width='100%' height='100%' fill='black'/></svg>";
-
 /**
- * StreamViewer displays an MJPEG stream from the simulator.
+ * StreamViewer displays frames from the simulator via IPC.
  *
- * Key insight: For MJPEG streams, the browser fires 'load' event for each new frame.
- * We draw to canvas on each load event, not in an animation loop.
+ * Frames are received as base64-encoded JPEGs via IPC events.
+ * Touch events are sent via IPC to the main process.
  */
-export function StreamViewer({ streamUrl, udid }: StreamViewerProps) {
+export function StreamViewer({ udid }: StreamViewerProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [dimensions, setDimensions] = useState("");
   const [isPressing, setIsPressing] = useState(false);
   const [touchPoint, setTouchPoint] = useState<TouchPoint | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const imgRef = useRef<HTMLImageElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const frameCountRef = useRef(0);
   const dragStartRef = useRef<TouchPoint | null>(null);
 
   // Send touch event to backend (began, moved, ended)
-  // Uses simulator-server stdin for low-latency continuous touch
   const sendTouch = useCallback(
     async (point: TouchPoint, touchType: "began" | "moved" | "ended") => {
       try {
         // Fire-and-forget for move events to avoid blocking
-        fetch("/api/simulator/touch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            udid,
-            type: touchType,
-            touches: [{ x: point.x, y: point.y }],
-          }),
+        api.simulator.touch({
+          udid,
+          type: touchType,
+          touches: [{ x: point.x, y: point.y }],
         }).catch((err) => {
           console.error("[StreamViewer] Failed to send touch:", err);
         });
@@ -154,11 +145,11 @@ export function StreamViewer({ streamUrl, udid }: StreamViewerProps) {
     [isPressing, getNormalizedCoordinates, sendTouch]
   );
 
+  // Subscribe to frame events from IPC
   useEffect(() => {
-    const img = imgRef.current;
     const canvas = canvasRef.current;
-    if (!img || !canvas) {
-      console.log("[StreamViewer] Missing refs");
+    if (!canvas) {
+      console.log("[StreamViewer] Missing canvas ref");
       return;
     }
 
@@ -168,106 +159,46 @@ export function StreamViewer({ streamUrl, udid }: StreamViewerProps) {
       return;
     }
 
-    console.log("[StreamViewer] Setting up stream:", streamUrl);
+    console.log("[StreamViewer] Setting up IPC stream for UDID:", udid);
 
-    let isRunning = false;
-    let animationId: number | null = null;
+    // Create an image element to decode base64 frames
+    const img = new Image();
 
-    const drawFrame = () => {
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
-      if (w === 0 || h === 0) return;
+    const unsubscribe = api.simulator.onStreamFrame((frame) => {
+      // Only process frames for this UDID
+      if (frame.udid !== udid) return;
 
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
-        setDimensions(`${w}x${h}`);
-        console.log("[StreamViewer] Canvas resized to:", w, "x", h);
-      }
+      // Decode base64 frame
+      img.onload = () => {
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
 
-      ctx.drawImage(img, 0, 0);
+        if (w === 0 || h === 0) return;
 
-      frameCountRef.current++;
-      if (frameCountRef.current % 60 === 0) {
-        console.log("[StreamViewer] Drew frame", frameCountRef.current);
-      }
-    };
-
-    const animationLoop = () => {
-      if (!isRunning) return;
-      drawFrame();
-      animationId = requestAnimationFrame(animationLoop);
-    };
-
-    const onLoad = () => {
-      console.log("[StreamViewer] img.onload fired");
-      setIsLoading(false);
-      if (!isRunning) {
-        isRunning = true;
-        console.log("[StreamViewer] Starting animation loop");
-        animationLoop();
-      }
-    };
-
-    const onError = () => {
-      console.log("[StreamViewer] img.onerror, reconnecting...");
-      isRunning = false;
-      if (animationId) {
-        cancelAnimationFrame(animationId);
-        animationId = null;
-      }
-      if (img.src !== NO_IMAGE_DATA) {
-        const srcCopy = img.src;
-        img.src = NO_IMAGE_DATA;
-        img.src = srcCopy;
-      }
-    };
-
-    img.addEventListener("load", onLoad);
-    img.addEventListener("error", onError);
-
-    // Set stream URL (radon-ide pattern: reset first, then set)
-    img.src = NO_IMAGE_DATA;
-    img.src = streamUrl;
-    console.log("[StreamViewer] img.src set to:", streamUrl);
-
-    // Health check using img.decode() - detects dropped connections
-    let healthCheckTimer: ReturnType<typeof setTimeout>;
-    let cancelled = false;
-
-    const checkHealth = async () => {
-      if (cancelled) return;
-      if (img.src && img.src !== NO_IMAGE_DATA) {
-        try {
-          await img.decode();
-        } catch {
-          console.log("[StreamViewer] Health check failed, reconnecting...");
-          if (!cancelled) {
-            const srcCopy = img.src;
-            img.src = NO_IMAGE_DATA;
-            img.src = srcCopy;
-          }
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+          setDimensions(`${w}x${h}`);
+          console.log("[StreamViewer] Canvas resized to:", w, "x", h);
         }
-      }
-      if (!cancelled) {
-        healthCheckTimer = setTimeout(checkHealth, 2000);
-      }
-    };
-    healthCheckTimer = setTimeout(checkHealth, 2000);
+
+        ctx.drawImage(img, 0, 0);
+        setIsLoading(false);
+
+        frameCountRef.current++;
+        if (frameCountRef.current % 60 === 0) {
+          console.log("[StreamViewer] Drew frame", frameCountRef.current);
+        }
+      };
+
+      img.src = `data:image/jpeg;base64,${frame.frame}`;
+    });
 
     return () => {
       console.log("[StreamViewer] Cleanup");
-      cancelled = true;
-      isRunning = false;
-      if (animationId) {
-        cancelAnimationFrame(animationId);
-      }
-      clearTimeout(healthCheckTimer);
-      img.removeEventListener("load", onLoad);
-      img.removeEventListener("error", onError);
-      img.src = NO_IMAGE_DATA;
+      unsubscribe();
     };
-  }, [streamUrl]);
+  }, [udid]);
 
   // Calculate touch indicator position relative to canvas
   const getTouchIndicatorStyle = useCallback(() => {
@@ -321,14 +252,6 @@ export function StreamViewer({ streamUrl, udid }: StreamViewerProps) {
           </div>
         </div>
       )}
-
-      {/* Hidden img receives the MJPEG stream */}
-      <img
-        ref={imgRef}
-        style={{ display: "none" }}
-        crossOrigin="anonymous"
-        alt=""
-      />
 
       {/* Visible canvas displays frames */}
       <canvas

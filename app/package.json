@@ -9,8 +9,10 @@
   },
   "scripts": {
     "dev": "NODE_ENV=development concurrently -k \"pnpm dev:frontend\" \"pnpm dev:electron\"",
+    "dev:browser": "NODE_ENV=development concurrently -k \"pnpm dev:frontend\" \"pnpm dev:server\"",
     "dev:frontend": "pnpm --filter @plasma/frontend dev",
     "dev:electron": "pnpm build:main && pnpm build:preload && NODE_ENV=development electron .",
+    "dev:server": "pnpm build:main && NODE_ENV=development node dist/main/server-standalone.js",
     "dev:watch": "NODE_ENV=development concurrently -k \"pnpm dev:frontend\" \"tsc -p tsconfig.main.json -w\" \"tsc -p tsconfig.preload.json -w\" \"sleep 2 && NODE_ENV=development electron .\"",
     "build": "pnpm build:main && pnpm build:preload && pnpm --filter @plasma/frontend build",
     "build:main": "tsc -p tsconfig.main.json",
@@ -20,15 +22,14 @@
     "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.preload.json"
   },
   "dependencies": {
-    "@hono/node-server": "^1.13.7",
     "better-sqlite3": "^11.7.0",
-    "execa": "^9.5.2",
-    "hono": "^4.6.16",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.5",
+    "@types/ws": "^8.5.13",
     "concurrently": "^9.1.2",
     "electron": "^34.0.0",
     "electron-builder": "^25.1.8",

@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { FolderOpen } from "lucide-react"
+import { api } from "@/lib/api"
 
 function getPlatformProjectTypes(): string {
   const platform = navigator.platform.toLowerCase()
@@ -21,36 +22,9 @@ function getPlatformProjectTypes(): string {
   return "Android"
 }
 
-interface ValidateProjectResponse {
-  valid: boolean
-  type?: "xcode" | "android"
-  name?: string
-  /** Full path to the project file (.xcworkspace, .xcodeproj, or build.gradle) */
-  path?: string
-  error?: string
-}
-
 interface RecentProject {
   path: string
   name: string
-  type: "xcode" | "android"
-  valid: boolean
-}
-
-interface RecentProjectsResponse {
-  projects: RecentProject[]
-}
-
-function getApiBaseUrl(): string {
-  const base = import.meta.env.VITE_API_BASE_URL
-  if (base) {
-    return base.replace(/\/$/, "")
-  }
-  // In Electron, we always use localhost:4000
-  if (typeof window !== "undefined" && "electron" in window) {
-    return "http://localhost:4000"
-  }
-  return ""
 }
 
 export function GetStarted() {
@@ -64,24 +38,16 @@ export function GetStarted() {
   const inputRef = useRef<HTMLInputElement>(null)
   const suggestionsRef = useRef<HTMLDivElement>(null)
   const projectTypes = useMemo(() => getPlatformProjectTypes(), [])
-  const apiBase = useMemo(() => getApiBaseUrl(), [])
 
   // Fetch recent projects on mount and when typing
   useEffect(() => {
     const fetchProjects = async () => {
       try {
-        const query = path ? `?query=${encodeURIComponent(path)}` : ""
-        const url = apiBase
-          ? `${apiBase}/api/projects/recent${query}`
-          : `/api/projects/recent${query}`
-        const response = await fetch(url)
-        if (!response.ok) {
-          setSuggestions([])
-          return
-        }
-        const data: RecentProjectsResponse = await response.json()
-        // Only show valid projects
-        setSuggestions(data.projects.filter((p) => p.valid))
+        const projects = await api.projects.getRecent({
+          query: path || undefined,
+          limit: 10,
+        })
+        setSuggestions(projects)
       } catch {
         setSuggestions([])
       }
@@ -115,31 +81,16 @@ export function GetStarted() {
     setShowSuggestions(false)
 
     try {
-      const url = apiBase
-        ? `${apiBase}/api/projects/validate`
-        : "/api/projects/validate"
-      const response = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ path }),
-      })
+      const result = await api.projects.validate({ path })
 
-      const data: ValidateProjectResponse | null = await response
-        .json()
-        .catch(() => null)
-
-      if (!response.ok) {
-        setError(data?.error || `Request failed (${response.status})`)
+      if (result.error) {
+        setError(result.error)
         return
       }
 
-      if (data?.valid && data.path) {
+      if (result.project?.valid && result.project.path) {
         // Use the resolved project file path, not the input directory
-        setSearchParams({ project: data.path })
-      } else if (data && !data.valid) {
-        setError(data.error || "Invalid project directory")
+        setSearchParams({ project: result.project.path })
       } else {
         setError("Invalid project directory")
       }

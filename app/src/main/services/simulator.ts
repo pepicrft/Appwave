@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import fetch from 'node-fetch';
+import { registerProcess } from './process-manager';
 
 // Types
 export interface Simulator {
@@ -136,6 +137,7 @@ async function startSession(
   ], {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+  registerProcess(proc);
 
   const stdin = proc.stdin!;
 
@@ -263,6 +265,7 @@ function emitLog(type: StreamLogEvent['type'], message: string) {
 export async function listSimulators(): Promise<Simulator[]> {
   return new Promise((resolve, reject) => {
     const proc = spawn('xcrun', ['simctl', 'list', 'devices', '-j']);
+    registerProcess(proc);
     let stdout = '';
     let stderr = '';
 
@@ -357,6 +360,7 @@ export async function installAndLaunch(
 function runCommand(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, args);
+    registerProcess(proc);
     let stdout = '';
     let stderr = '';
 
@@ -424,6 +428,7 @@ export async function sendTap(
     const proc = spawn(axePath, ['tap', '-x', pointX.toString(), '-y', pointY.toString(), '--udid', udid], {
       env: { ...process.env, DYLD_FRAMEWORK_PATH: frameworksPath },
     });
+    registerProcess(proc);
 
     let stderr = '';
     proc.stderr.on('data', (data) => {
@@ -483,6 +488,7 @@ export async function sendSwipe(
     ], {
       env: { ...process.env, DYLD_FRAMEWORK_PATH: frameworksPath },
     });
+    registerProcess(proc);
 
     let stderr = '';
     proc.stderr.on('data', (data) => {
