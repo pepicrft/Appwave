@@ -11,18 +11,22 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Apple, Smartphone, FolderOpen, Clock, CheckCircle2, XCircle } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Apple, Smartphone, FolderOpen, Clock, Plus, FolderSearch, CheckCircle2, XCircle } from "lucide-react"
 import { api } from "@/lib/api"
 import type { UnifiedProject } from "@/lib/api"
 
 export function OpenProject() {
   const navigate = useNavigate()
 
-  // Form state
-  const [projectName, setProjectName] = useState("")
+  // Form state for existing projects
   const [xcodeProjectPath, setXcodeProjectPath] = useState("")
   const [androidProjectPath, setAndroidProjectPath] = useState("")
   const [isCreating, setIsCreating] = useState(false)
+
+  // Form state for new project
+  const [newProjectName, setNewProjectName] = useState("")
+  const [newProjectDirectory, setNewProjectDirectory] = useState("")
 
   // Validation state
   const [xcodeValidation, setXcodeValidation] = useState<{ valid: boolean; error?: string } | null>(null)
@@ -90,16 +94,8 @@ export function OpenProject() {
     }
   }, [androidProjectPath])
 
-  const handleCreateProject = async () => {
-    if (!projectName.trim()) {
-      return
-    }
-
-    // Must have at least one valid project
-    const hasValidXcode = xcodeProjectPath.trim() && xcodeValidation?.valid
-    const hasValidAndroid = androidProjectPath.trim() && androidValidation?.valid
-
-    if (!hasValidXcode && !hasValidAndroid) {
+  const handleCreateNewProject = async () => {
+    if (!newProjectName.trim() || !newProjectDirectory.trim()) {
       return
     }
 
@@ -107,9 +103,8 @@ export function OpenProject() {
 
     try {
       const result = await api.projects.create({
-        name: projectName.trim(),
-        xcodePath: xcodeProjectPath.trim() || undefined,
-        androidPath: androidProjectPath.trim() || undefined,
+        name: newProjectName.trim(),
+        directory: newProjectDirectory.trim(),
       })
 
       if (result.project) {
@@ -119,6 +114,15 @@ export function OpenProject() {
       console.error("Failed to create project:", err)
     } finally {
       setIsCreating(false)
+    }
+  }
+
+  const handleBrowseNewProjectDirectory = async () => {
+    const result = await api.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (!result.canceled && result.filePaths.length > 0) {
+      setNewProjectDirectory(result.filePaths[0])
     }
   }
 
@@ -144,12 +148,45 @@ export function OpenProject() {
     navigate(`/project/${project.id}`)
   }
 
-  // Check if we have at least one valid project path
+  const handleOpenExistingProject = async () => {
+    // Must have at least one valid project
+    const hasValidXcode = xcodeProjectPath.trim() && xcodeValidation?.valid
+    const hasValidAndroid = androidProjectPath.trim() && androidValidation?.valid
+
+    if (!hasValidXcode && !hasValidAndroid) {
+      return
+    }
+
+    // Auto-generate project name from the first valid path
+    const pathToUse = xcodeProjectPath.trim() || androidProjectPath.trim()
+    const generatedName = pathToUse.split('/').pop()?.replace(/\.(xcodeproj|xcworkspace)$/, '') || 'Untitled Project'
+
+    setIsCreating(true)
+
+    try {
+      const result = await api.projects.create({
+        name: generatedName,
+        xcodePath: xcodeProjectPath.trim() || undefined,
+        androidPath: androidProjectPath.trim() || undefined,
+      })
+
+      if (result.project) {
+        navigate(`/project/${result.project.id}`)
+      }
+    } catch (err) {
+      console.error("Failed to open project:", err)
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  // Check if we have at least one valid project path (for existing tab)
   const hasValidXcode = xcodeProjectPath.trim() && xcodeValidation?.valid
   const hasValidAndroid = androidProjectPath.trim() && androidValidation?.valid
   const hasAtLeastOneProject = hasValidXcode || hasValidAndroid
 
-  const canCreate = projectName.trim() && hasAtLeastOneProject
+  // Check if new project form is valid
+  const canCreateNew = newProjectName.trim() && newProjectDirectory.trim()
 
   const ValidationIcon = ({ validation, validating }: { validation: { valid: boolean; error?: string } | null, validating: boolean }) => {
     if (validating) {
@@ -183,142 +220,208 @@ export function OpenProject() {
 
       {/* Main content */}
       <div
-        className="flex-1 flex flex-col items-center justify-center p-6 gap-6 overflow-auto"
+        className="flex-1 flex flex-col items-center p-6 pt-12 overflow-auto"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
         <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Open Project</CardTitle>
-            <CardDescription>
-              Configure your mobile app project. At least one platform is required.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-6">
-            {/* Project Name */}
-            <div className="grid gap-2">
-              <Label htmlFor="project-name">Project Name</Label>
-              <Input
-                id="project-name"
-                type="text"
-                placeholder="My App"
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-              />
-            </div>
+          <Tabs defaultValue={recentProjects.length > 0 ? "recent" : "new"}>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-2xl text-center mb-4">Open Project</CardTitle>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="recent" className="flex items-center gap-1.5">
+                  <Clock className="h-4 w-4" />
+                  Recent
+                </TabsTrigger>
+                <TabsTrigger value="existing" className="flex items-center gap-1.5">
+                  <FolderSearch className="h-4 w-4" />
+                  Existing
+                </TabsTrigger>
+                <TabsTrigger value="new" className="flex items-center gap-1.5">
+                  <Plus className="h-4 w-4" />
+                  New
+                </TabsTrigger>
+              </TabsList>
+            </CardHeader>
 
-            {/* Xcode Project */}
-            <div className="grid gap-2">
-              <Label htmlFor="xcode-path" className="flex items-center gap-2">
-                <Apple className="h-4 w-4" />
-                Xcode Project
-                <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Input
-                    id="xcode-path"
-                    type="text"
-                    placeholder="/path/to/Project.xcodeproj"
-                    value={xcodeProjectPath}
-                    onChange={(e) => setXcodeProjectPath(e.target.value)}
-                    className="pr-8"
-                  />
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                    <ValidationIcon validation={xcodeValidation} validating={xcodeValidating} />
+            {/* Recent Projects Tab */}
+            <TabsContent value="recent" className="mt-0">
+              <CardContent>
+                {recentProjects.length > 0 ? (
+                  <div className="space-y-2">
+                    {recentProjects.map((project) => (
+                      <button
+                        key={project.id}
+                        onClick={() => handleOpenRecentProject(project)}
+                        className="w-full text-left p-3 rounded-lg border bg-card hover:bg-accent transition-colors"
+                      >
+                        <div className="font-medium">{project.name}</div>
+                        <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                          {project.xcode_path && (
+                            <span className="flex items-center gap-1">
+                              <Apple className="h-3 w-3" /> iOS
+                            </span>
+                          )}
+                          {project.android_path && (
+                            <span className="flex items-center gap-1">
+                              <Smartphone className="h-3 w-3" /> Android
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
                   </div>
-                </div>
-                <Button variant="outline" size="icon" onClick={handleBrowseXcode}>
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-              </div>
-              {xcodeValidation && !xcodeValidation.valid && xcodeValidation.error && (
-                <p className="text-sm text-destructive">{xcodeValidation.error}</p>
-              )}
-              {!xcodeValidation && (
-                <p className="text-sm text-muted-foreground">
-                  Select an .xcodeproj, .xcworkspace, or directory containing one
-                </p>
-              )}
-            </div>
-
-            {/* Android Project */}
-            <div className="grid gap-2">
-              <Label htmlFor="android-path" className="flex items-center gap-2">
-                <Smartphone className="h-4 w-4" />
-                Android Project
-                <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <div className="flex gap-2">
-                <div className="relative flex-1">
-                  <Input
-                    id="android-path"
-                    type="text"
-                    placeholder="/path/to/android-project"
-                    value={androidProjectPath}
-                    onChange={(e) => setAndroidProjectPath(e.target.value)}
-                    className="pr-8"
-                  />
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                    <ValidationIcon validation={androidValidation} validating={androidValidating} />
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Clock className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p>No recent projects</p>
+                    <p className="text-sm mt-1">Create a new project to get started</p>
                   </div>
-                </div>
-                <Button variant="outline" size="icon" onClick={handleBrowseAndroid}>
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-              </div>
-              {androidValidation && !androidValidation.valid && androidValidation.error && (
-                <p className="text-sm text-destructive">{androidValidation.error}</p>
-              )}
-              {!androidValidation && (
-                <p className="text-sm text-muted-foreground">
-                  Select a directory containing build.gradle or build.gradle.kts
-                </p>
-              )}
-            </div>
-          </CardContent>
-          <CardFooter>
-            <Button
-              className="w-full"
-              onClick={handleCreateProject}
-              disabled={isCreating || !canCreate}
-            >
-              {isCreating ? "Opening..." : "Open Project"}
-            </Button>
-          </CardFooter>
-        </Card>
+                )}
+              </CardContent>
+            </TabsContent>
 
-        {/* Recent Projects */}
-        {recentProjects.length > 0 && (
-          <div className="w-full max-w-md">
-            <h3 className="text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2">
-              <Clock className="h-4 w-4" />
-              Recent Projects
-            </h3>
-            <div className="space-y-2">
-              {recentProjects.map((project) => (
-                <button
-                  key={project.id}
-                  onClick={() => handleOpenRecentProject(project)}
-                  className="w-full text-left p-3 rounded-lg border bg-card hover:bg-accent transition-colors"
+            {/* Existing Project Tab */}
+            <TabsContent value="existing" className="mt-0">
+              <CardContent className="grid gap-4">
+                <CardDescription>
+                  Open an existing Xcode or Android project from your file system.
+                </CardDescription>
+
+                {/* Xcode Project */}
+                <div className="grid gap-2">
+                  <Label htmlFor="existing-xcode-path" className="flex items-center gap-2">
+                    <Apple className="h-4 w-4" />
+                    Xcode Project
+                    <span className="text-muted-foreground font-normal">(optional)</span>
+                  </Label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        id="existing-xcode-path"
+                        type="text"
+                        placeholder="/path/to/Project.xcodeproj"
+                        value={xcodeProjectPath}
+                        onChange={(e) => setXcodeProjectPath(e.target.value)}
+                        className="pr-8"
+                      />
+                      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                        <ValidationIcon validation={xcodeValidation} validating={xcodeValidating} />
+                      </div>
+                    </div>
+                    <Button variant="outline" size="icon" onClick={handleBrowseXcode}>
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {xcodeValidation && !xcodeValidation.valid && xcodeValidation.error && (
+                    <p className="text-sm text-destructive mt-1">{xcodeValidation.error}</p>
+                  )}
+                  {!xcodeValidation && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Select an .xcodeproj, .xcworkspace, or directory containing one
+                    </p>
+                  )}
+                </div>
+
+                {/* Android Project */}
+                <div className="grid gap-2">
+                  <Label htmlFor="existing-android-path" className="flex items-center gap-2">
+                    <Smartphone className="h-4 w-4" />
+                    Android Project
+                    <span className="text-muted-foreground font-normal">(optional)</span>
+                  </Label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        id="existing-android-path"
+                        type="text"
+                        placeholder="/path/to/android-project"
+                        value={androidProjectPath}
+                        onChange={(e) => setAndroidProjectPath(e.target.value)}
+                        className="pr-8"
+                      />
+                      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                        <ValidationIcon validation={androidValidation} validating={androidValidating} />
+                      </div>
+                    </div>
+                    <Button variant="outline" size="icon" onClick={handleBrowseAndroid}>
+                      <FolderOpen className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {androidValidation && !androidValidation.valid && androidValidation.error && (
+                    <p className="text-sm text-destructive mt-1">{androidValidation.error}</p>
+                  )}
+                  {!androidValidation && (
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Select a directory containing build.gradle or build.gradle.kts
+                    </p>
+                  )}
+                </div>
+              </CardContent>
+              <CardFooter className="pt-2">
+                <Button
+                  className="w-full"
+                  onClick={handleOpenExistingProject}
+                  disabled={isCreating || !hasAtLeastOneProject}
                 >
-                  <div className="font-medium">{project.name}</div>
-                  <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
-                    {project.xcode_path && (
-                      <span className="flex items-center gap-1">
-                        <Apple className="h-3 w-3" /> iOS
-                      </span>
-                    )}
-                    {project.android_path && (
-                      <span className="flex items-center gap-1">
-                        <Smartphone className="h-3 w-3" /> Android
-                      </span>
-                    )}
+                  {isCreating ? "Opening..." : "Open Project"}
+                </Button>
+              </CardFooter>
+            </TabsContent>
+
+            {/* New Project Tab */}
+            <TabsContent value="new" className="mt-0">
+              <CardContent className="grid gap-4">
+                <CardDescription>
+                  Create a new project in an empty directory.
+                </CardDescription>
+
+                {/* Project Name */}
+                <div className="grid gap-2">
+                  <Label htmlFor="new-project-name">Project Name</Label>
+                  <Input
+                    id="new-project-name"
+                    type="text"
+                    placeholder="My App"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                  />
+                </div>
+
+                {/* Directory */}
+                <div className="grid gap-2">
+                  <Label htmlFor="new-project-directory" className="flex items-center gap-2">
+                    <FolderOpen className="h-4 w-4" />
+                    Directory
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="new-project-directory"
+                      type="text"
+                      placeholder="/path/to/directory"
+                      value={newProjectDirectory}
+                      onChange={(e) => setNewProjectDirectory(e.target.value)}
+                    />
+                    <Button variant="outline" size="icon" onClick={handleBrowseNewProjectDirectory}>
+                      <FolderSearch className="h-4 w-4" />
+                    </Button>
                   </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Select an empty directory where the project will be created
+                  </p>
+                </div>
+              </CardContent>
+              <CardFooter className="pt-2">
+                <Button
+                  className="w-full"
+                  onClick={handleCreateNewProject}
+                  disabled={isCreating || !canCreateNew}
+                >
+                  {isCreating ? "Creating..." : "Create Project"}
+                </Button>
+              </CardFooter>
+            </TabsContent>
+          </Tabs>
+        </Card>
       </div>
     </div>
   )

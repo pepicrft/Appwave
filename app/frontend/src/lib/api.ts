@@ -155,6 +155,7 @@ interface CreateProjectRequest {
   name: string;
   xcodePath?: string;
   androidPath?: string;
+  directory?: string;
 }
 
 interface CreateProjectResponse {

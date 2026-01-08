@@ -11,6 +11,7 @@ import {
   updateProjectLastOpened,
 } from './services/database';
 import { validateXcodePath, validateAndroidPath } from './services/project-validation';
+import { scaffoldNewProject } from './services/project-scaffold';
 import { discoverProject, buildSchemeStream, getLaunchableProducts } from './services/xcode';
 import {
   listSimulators,
@@ -134,8 +135,28 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     // New unified projects API
     if (path === '/api/projects/create' && req.method === 'POST') {
       const body = await readBody(req);
-      const { name, xcodePath, androidPath } = body;
+      const { name, xcodePath, androidPath, directory } = body;
 
+      // If directory is provided, scaffold a new project
+      if (directory) {
+        if (!name) {
+          sendJson(res, { error: 'Name is required for new project' }, 400);
+          return;
+        }
+
+        const result = await scaffoldNewProject(directory, name);
+        if (!result.success) {
+          sendJson(res, { error: result.error }, 400);
+          return;
+        }
+
+        // Save to database with the scaffolded paths
+        const project = saveUnifiedProject(name, result.xcodePath, result.androidPath);
+        sendJson(res, { project, scaffoldResult: result });
+        return;
+      }
+
+      // Otherwise, open an existing project
       if (!name || (!xcodePath && !androidPath)) {
         sendJson(res, { error: 'Name and at least one project path are required' }, 400);
         return;
